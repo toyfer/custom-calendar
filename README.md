@@ -1,21 +1,23 @@
 # custom-calendar
 
 Google Calendar のデータを使った、**完全自作 UI** の静的カレンダーアプリです。  
-サーバー DB 不要・GitHub Pages だけで動きます。
+サーバー DB 不要・GitHub Pages だけで動きます。**複数 Google アカウント**に対応しています。
 
 ## デモ
-
-GitHub Pages 有効化後:
 
 `https://toyfer.github.io/custom-calendar/`
 
 ## 機能
 
-- Google アカウント連携（OAuth / GIS トークンモデル）
-- 月表示・今日の予定リスト
-- 予定の作成・削除
-- IndexedDB キャッシュ（再表示を高速化）
-- ダーク調の自作 UI
+- **複数アカウント**の追加・切替・削除（アカウントピッカー）
+- アカウントごとの色分け・凡例
+- 「全アカウント表示」トグル（マージ / 単一）
+- 月表示 + 選択日の予定リスト
+- 予定の作成（作成先アカウント選択）・削除
+- 終日予定
+- IndexedDB キャッシュ / sessionStorage トークン
+- キーボード: `←` `→` 月移動 / `T` 今日
+- ダーク調 UI
 
 ## セットアップ（OAuth）
 
@@ -23,11 +25,13 @@ GitHub Pages 有効化後:
 
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
 2. [Calendar API](https://console.cloud.google.com/flows/enableapi?apiid=calendar-json.googleapis.com) を有効化
-3. OAuth 同意画面を設定（User type: External または Testing）
-4. スコープを追加:
+3. OAuth 同意画面を設定（User type: External / Testing で可）
+4. スコープ:
    - `https://www.googleapis.com/auth/calendar.events`
-5. **OAuth クライアント ID（Web アプリ）** を作成
-6. **Authorized JavaScript origins** に追加:
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/userinfo.profile`
+5. **OAuth クライアント ID（Web）** を作成
+6. **Authorized JavaScript origins**:
 
 ```
 http://localhost:5500
@@ -35,11 +39,11 @@ http://127.0.0.1:5500
 https://toyfer.github.io
 ```
 
-7. **API キー** を作成（HTTP リファラ制限推奨: `https://toyfer.github.io/*`）
+7. **API キー**（リファラ制限推奨: `https://toyfer.github.io/*`）
 
-### 2. 認証情報を入れる
+### 2. 認証情報
 
-`config.json` を編集:
+`config.json` または画面右上「⚙ 設定」:
 
 ```json
 {
@@ -48,38 +52,30 @@ https://toyfer.github.io
 }
 ```
 
-またはページ右上の「設定」から入力し、ブラウザに保存することも可能です。
+Client Secret は不要です。
 
-> Client Secret は不要です（静的サイトでは使わない）。
+### 3. 複数アカウント（重要）
 
-### 3. GitHub Pages
+同意画面が **Testing** のとき:
 
-1. リポジトリ **Settings → Pages**
-2. Source: **Deploy from a branch**
-3. Branch: `main` / `/ (root)`
-4. Save
+- 使う **すべての** Google アカウントを **Test users** に追加する
+- 1つ目: 「Google で連携」
+- 2つ目以降: 「+ アカウント」（毎回アカウント選択 UI が出る）
+- チップをクリック → 表示切替 / 再連携 / 外す
 
-数分後: https://toyfer.github.io/custom-calendar/
+トークンは **sessionStorage**（タブを閉じると再連携が必要な場合あり）。  
+アカウントの名前・色などのメタは **localStorage** に残ります。
 
-### 4. Testing モードの場合
+### 4. GitHub Pages
 
-OAuth 同意画面が Testing なら、自分の Google アカウントを **Test users** に追加してください。
+Settings → Pages → Branch `main` / root
 
-## ローカル確認
+## ローカル
 
 ```bash
 npx serve .
-# または python3 -m http.server 5500
+# or: python3 -m http.server 5500
 ```
-
-`http://localhost:5500` を JavaScript origins に入れてあること。
-
-## テクノロジー
-
-- Google Identity Services（トークンモデル）
-- Google API Client (`gapi`) + Calendar API v3
-- 純粋前端（HTML / CSS / JS）
-- IndexedDB（イベントキャッシュ）
 
 ## ライセンス
 
