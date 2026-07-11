@@ -17,7 +17,7 @@ export function normalizeEvent(item, account, calendarMeta = {}) {
   const start = item.start?.dateTime || item.start?.date;
   let end = item.end?.dateTime || item.end?.date;
   if (allDay && end) {
-    // all-day end is exclusive
+    // all-day end is exclusive in Google Calendar API
     const d = new Date(`${end}T00:00:00`);
     d.setDate(d.getDate() - 1);
     end = toYmd(d);
@@ -33,6 +33,7 @@ export function normalizeEvent(item, account, calendarMeta = {}) {
     color: account.color,
     summary: item.summary || '(無題)',
     description: item.description || '',
+    location: item.location || '',
     start,
     end,
     allDay,
@@ -90,6 +91,35 @@ export function requestAccessToken(state, { prompt, hint } = {}) {
   });
 }
 
+/**
+ * Silent token refresh (no consent UI). Returns true if refreshed.
+ * On failure marks account stale — caller should prompt reauth.
+ */
+export async function trySilentRefresh(state, accountId) {
+  const acc = accountById(state, accountId);
+  if (!acc || !state.tokenClient) return false;
+  try {
+    const resp = await requestAccessToken(state, {
+      // empty prompt = silent if browser session still has grant
+      prompt: '',
+      hint: acc.email,
+    });
+    if (!resp?.access_token) return false;
+    state.tokens[accountId] = {
+      accessToken: resp.access_token,
+      expiresAt: Date.now() + (Number(resp.expires_in) || 3600) * 1000,
+      scope: resp.scope || state.tokens[accountId]?.scope || '',
+    };
+    acc.stale = false;
+    persistAccounts(state);
+    return true;
+  } catch {
+    acc.stale = true;
+    persistAccounts(state);
+    return false;
+  }
+}
+
 export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {}) {
   if (!hasValidConfig(state) || !state.tokenClient) {
     throw new Error('OAuth not configured');
@@ -107,7 +137,6 @@ export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {
   const id = info.sub;
   if (!id) throw new Error('no user id');
 
-  // Log granted scopes for debugging empty calendar results
   if (resp.scope) {
     console.info('[calendar] granted scopes:', resp.scope);
   }
@@ -160,10 +189,17 @@ export async function revokeAndRemove(state, accountId) {
   persistAccounts(state);
 }
 
-function getValidToken(state, accountId) {
+async function getValidToken(state, accountId) {
   const tok = state.tokens[accountId];
-  if (!tok?.accessToken) throw new Error('token missing');
-  if (tok.expiresAt && tok.expiresAt < Date.now() + 15_000) {
+  if (!tok?.accessToken) {
+    const ok = await trySilentRefresh(state, accountId);
+    if (!ok) throw new Error('token missing');
+    return state.tokens[accountId].accessToken;
+  }
+  // refresh 2 min before expiry
+  if (tok.expiresAt && tok.expiresAt < Date.now() + 120_000) {
+    const ok = await trySilentRefresh(state, accountId);
+    if (ok) return state.tokens[accountId].accessToken;
     const acc = accountById(state, accountId);
     if (acc) acc.stale = true;
     persistAccounts(state);
@@ -206,7 +242,6 @@ async function calendarRequest(accessToken, path, { method = 'GET', body } = {})
 
 /** Inclusive local month window → RFC3339 (UTC via toISOString) */
 export function monthWindow(viewYear, viewMonth) {
-  // from first day 00:00 local to last day 23:59:59.999 local
   const start = new Date(viewYear, viewMonth, 1, 0, 0, 0, 0);
   const end = new Date(viewYear, viewMonth + 1, 0, 23, 59, 59, 999);
   // pad ±1 day so timezone edge events are not dropped
@@ -219,8 +254,6 @@ export function monthWindow(viewYear, viewMonth) {
 }
 
 async function listCalendars(accessToken) {
-  // calendar.events scope can list calendars the user has event access to
-  // Prefer calendarList; fall back to primary only
   try {
     const data = await calendarRequest(
       accessToken,
@@ -275,7 +308,7 @@ async function listEventsForCalendar(accessToken, calendarId, timeMin, timeMax) 
  * Returns { events, meta } for UI diagnostics.
  */
 export async function fetchEventsForAccount(state, account) {
-  const accessToken = getValidToken(state, account.id);
+  const accessToken = await getValidToken(state, account.id);
   const { timeMin, timeMax } = monthWindow(state.viewYear, state.viewMonth);
 
   const calendars = await listCalendars(accessToken);
@@ -286,7 +319,6 @@ export async function fetchEventsForAccount(state, account) {
   const events = [];
   const perCal = [];
 
-  // Parallel per calendar (cap concurrency lightly by batching)
   const results = await Promise.allSettled(
     calendars.map(async (cal) => {
       const items = await listEventsForCalendar(accessToken, cal.id, timeMin, timeMax);
@@ -303,7 +335,12 @@ export async function fetchEventsForAccount(state, account) {
       }
     } else {
       console.warn(`[calendar] ${account.email} calendar fetch failed`, r.reason);
-      perCal.push({ id: '?', summary: 'error', count: -1, error: String(r.reason?.message || r.reason) });
+      perCal.push({
+        id: '?',
+        summary: 'error',
+        count: -1,
+        error: String(r.reason?.message || r.reason),
+      });
     }
   }
 
@@ -323,7 +360,7 @@ export async function fetchEventsForAccount(state, account) {
 }
 
 export async function insertEvent(state, accountId, resource, calendarId = 'primary') {
-  const accessToken = getValidToken(state, accountId);
+  const accessToken = await getValidToken(state, accountId);
   const encId = encodeURIComponent(calendarId || 'primary');
   return calendarRequest(accessToken, `/calendars/${encId}/events`, {
     method: 'POST',
@@ -332,7 +369,7 @@ export async function insertEvent(state, accountId, resource, calendarId = 'prim
 }
 
 export async function deleteEvent(state, accountId, eventId, calendarId = 'primary') {
-  const accessToken = getValidToken(state, accountId);
+  const accessToken = await getValidToken(state, accountId);
   const encCal = encodeURIComponent(calendarId || 'primary');
   const encEv = encodeURIComponent(eventId);
   return calendarRequest(accessToken, `/calendars/${encCal}/events/${encEv}`, {
