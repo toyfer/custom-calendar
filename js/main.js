@@ -1,31 +1,37 @@
 /**
  * Custom Calendar — entry point
- * Architecture:
- *   constants / storage / dates / state / cache / google / ui / main
- * UX: multi-account OVERLAY (not exclusive switch). Both usable for create/delete.
+ * Multi-account OVERLAY · month/week/list · drag · multi-calendar create · recurring edit
  */
 
+import { RECUR_PRESETS, VIEWS } from './constants.js';
 import { cacheEvents, loadCachedEvents } from './cache.js';
 import {
+  addDays,
   clampYmdToMonth,
   defaultRangeForDay,
+  moveEventToDate,
   parseYmd,
+  startOfWeek,
   toLocalInputValue,
   toYmd,
 } from './dates.js';
 import {
+  buildEventResource,
+  buildTimePatch,
   connectAccount,
   deleteEvent as apiDeleteEvent,
   fetchEventsForAccount,
   initGapiClient,
   initTokenClient,
   insertEvent,
+  patchEvent,
   revokeAndRemove,
   trySilentRefresh,
 } from './google.js';
 import {
   accountById,
   createState,
+  eventByUid,
   hasValidConfig,
   liveAccounts,
   loadConfig,
@@ -38,10 +44,17 @@ import {
 import {
   $,
   closeAccountMenu,
+  closeEditModal,
+  closeRecurScopeModal,
+  fillEditForm,
   openAccountMenu,
+  openEditModal,
+  openRecurScopeModal,
   renderAccounts,
   renderCalendar,
+  renderCalendarSelect,
   renderEventList,
+  renderRecurSelect,
   setDisabled,
   setLoading,
   setProp,
@@ -51,12 +64,17 @@ import {
 } from './ui.js';
 
 const state = createState();
-
-// Serialize month fetches so rapid ←/→ don't race
 let fetchSeq = 0;
 let fetchInFlight = null;
 
-// ── render helpers ────────────────────────────────────────
+// Pending action after recurring scope choice
+let pendingRecurAction = null; // { type: 'edit'|'delete'|'move', ev, payload? }
+
+function tz() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+// ── render ────────────────────────────────────────────────
 function paint() {
   renderAccounts(state, {
     canAuth: () => hasValidConfig(state) && !!state.tokenClient,
@@ -91,28 +109,54 @@ function paint() {
     },
   });
 
-  renderCalendar(state, (ymd) => {
-    state.selectedDate = ymd;
-    // Selecting a muted (adjacent month) day → jump view to that month
-    const d = parseYmd(ymd);
-    if (d.getFullYear() !== state.viewYear || d.getMonth() !== state.viewMonth) {
-      state.viewYear = d.getFullYear();
-      state.viewMonth = d.getMonth();
+  renderCalendar(state, {
+    onSelectDate: (ymd, ev) => {
+      state.selectedDate = ymd;
+      const d = parseYmd(ymd);
+      if (state.viewMode === VIEWS.month) {
+        if (d.getFullYear() !== state.viewYear || d.getMonth() !== state.viewMonth) {
+          state.viewYear = d.getFullYear();
+          state.viewMonth = d.getMonth();
+          persistAccounts(state);
+          paint();
+          if (liveAccounts(state).length) fetchAll();
+          else fillDefaultTimes(ymd);
+          if (ev) openEdit(ev);
+          return;
+        }
+      } else {
+        // keep viewYear/Month in sync with selected
+        state.viewYear = d.getFullYear();
+        state.viewMonth = d.getMonth();
+      }
+      fillDefaultTimes(ymd);
       persistAccounts(state);
       paint();
-      if (liveAccounts(state).length) fetchAll();
-      else fillDefaultTimes(ymd);
-      return;
-    }
-    fillDefaultTimes(ymd);
-    persistAccounts(state);
-    paint();
+      if (ev) openEdit(ev);
+    },
+    onEventClick: (ev) => openEdit(ev),
+    onTimeClick: (ymd, hour, minute) => {
+      state.selectedDate = ymd;
+      const start = parseYmd(ymd);
+      start.setHours(hour, minute, 0, 0);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      setProp('eventAllDay', 'checked', false);
+      setProp('eventStart', 'type', 'datetime-local');
+      setProp('eventEnd', 'type', 'datetime-local');
+      setProp('eventStart', 'value', toLocalInputValue(start));
+      setProp('eventEnd', 'value', toLocalInputValue(end));
+      persistAccounts(state);
+      paint();
+      $('eventTitle')?.focus();
+    },
+    onDropEvent: (uid, ymd, timeHint) => handleDrop(uid, ymd, timeHint),
   });
 
   renderEventList(state, {
     canAuth: () => hasValidConfig(state) && !!state.tokenClient,
     onAddAccount: () => addAccount(),
     onDelete: (ev) => askDelete(ev),
+    onEdit: (ev) => openEdit(ev),
   });
 }
 
@@ -128,16 +172,25 @@ function fillDefaultTimes(ymd) {
   setProp('eventEnd', 'value', toLocalInputValue(end));
 }
 
-function shiftMonth(delta) {
-  state.viewMonth += delta;
-  if (state.viewMonth < 0) {
-    state.viewMonth = 11;
-    state.viewYear -= 1;
-  } else if (state.viewMonth > 11) {
-    state.viewMonth = 0;
-    state.viewYear += 1;
+function shiftView(delta) {
+  if (state.viewMode === VIEWS.week) {
+    const d = parseYmd(state.selectedDate || toYmd(new Date()));
+    const next = addDays(d, delta * 7);
+    state.selectedDate = toYmd(next);
+    state.viewYear = next.getFullYear();
+    state.viewMonth = next.getMonth();
+  } else {
+    // month + list
+    state.viewMonth += delta;
+    if (state.viewMonth < 0) {
+      state.viewMonth = 11;
+      state.viewYear -= 1;
+    } else if (state.viewMonth > 11) {
+      state.viewMonth = 0;
+      state.viewYear += 1;
+    }
+    state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
   }
-  state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
   fillDefaultTimes(state.selectedDate);
   persistAccounts(state);
   paint();
@@ -145,7 +198,16 @@ function shiftMonth(delta) {
   return Promise.resolve();
 }
 
-// ── Google bootstrapping ──────────────────────────────────
+function setViewMode(mode) {
+  if (!Object.values(VIEWS).includes(mode)) return;
+  state.viewMode = mode;
+  persistAccounts(state);
+  paint();
+  // week may need wider window already covered by month pad; refetch for safety
+  if (liveAccounts(state).length) fetchAll();
+}
+
+// ── Google boot ───────────────────────────────────────────
 function maybeEnableAuth() {
   if (!state.gapiReady || !state.gisReady) return;
   if (!hasValidConfig(state)) {
@@ -183,7 +245,7 @@ window.__gisLoaded = () => {
   maybeEnableAuth();
 };
 
-// ── account operations ────────────────────────────────────
+// ── accounts ──────────────────────────────────────────────
 async function addAccount() {
   if (!state.tokenClient) {
     toast('まず設定で Client ID / API Key を保存してください', 'error');
@@ -242,12 +304,37 @@ async function removeAccount(accountId) {
   paint();
 }
 
-// ── data ──────────────────────────────────────────────────
+// ── fetch ─────────────────────────────────────────────────
+function fetchWindow() {
+  // Always cover current month ±1 day; week also covered since selected is in month
+  // Expand: if week view, ensure week days included
+  if (state.viewMode === VIEWS.week && state.selectedDate) {
+    const ws = startOfWeek(parseYmd(state.selectedDate));
+    const we = addDays(ws, 6);
+    // also pad month of week
+    const start = new Date(ws);
+    start.setDate(start.getDate() - 1);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(we);
+    end.setDate(end.getDate() + 1);
+    end.setHours(23, 59, 59, 999);
+    // union with month window
+    const mStart = new Date(state.viewYear, state.viewMonth, 0, 0, 0, 0, 0);
+    const mEnd = new Date(state.viewYear, state.viewMonth + 1, 1, 23, 59, 59, 999);
+    const tMin = start < mStart ? start : mStart;
+    const tMax = end > mEnd ? end : mEnd;
+    return { timeMin: tMin.toISOString(), timeMax: tMax.toISOString() };
+  }
+  const start = new Date(state.viewYear, state.viewMonth, 1, 0, 0, 0, 0);
+  const end = new Date(state.viewYear, state.viewMonth + 1, 0, 23, 59, 59, 999);
+  start.setDate(start.getDate() - 1);
+  end.setDate(end.getDate() + 1);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
+}
+
 async function fetchAll() {
-  // Coalesce concurrent calls — only the latest month window matters
   const mySeq = ++fetchSeq;
   if (fetchInFlight) {
-    // let previous settle; we'll re-run if still latest
     try {
       await fetchInFlight;
     } catch {
@@ -257,7 +344,6 @@ async function fetchAll() {
   }
 
   const run = (async () => {
-    // Attempt silent refresh for near-expired tokens first
     for (const a of state.accounts) {
       const tok = state.tokens[a.id];
       if (tok?.accessToken && tok.expiresAt && tok.expiresAt < Date.now() + 120_000) {
@@ -274,8 +360,11 @@ async function fetchAll() {
 
     setLoading(true, '全カレンダーから予定を取得中…');
     try {
-      const results = await Promise.allSettled(targets.map((a) => fetchEventsForAccount(state, a)));
-      if (mySeq !== fetchSeq) return; // superseded by newer month nav
+      const win = fetchWindow();
+      const results = await Promise.allSettled(
+        targets.map((a) => fetchEventsForAccount(state, a, win))
+      );
+      if (mySeq !== fetchSeq) return;
 
       const merged = [];
       const metas = [];
@@ -316,10 +405,7 @@ async function fetchAll() {
       } else if (!merged.length) {
         const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
         state.lastFetchNote = 'empty';
-        toast(
-          `0 件（カレンダー ${calCount || '?'} 個を走査）。表示月を確認 / 再連携でスコープ更新`,
-          'error'
-        );
+        toast(`0 件（カレンダー ${calCount || '?'} 個を走査）`, 'error');
         showBanner(
           `取得は成功しましたが <strong>0 件</strong> でした。` +
             `（走査カレンダー数: ${calCount || '不明'}）` +
@@ -352,10 +438,11 @@ async function fetchAll() {
   }
 }
 
-// ── create / delete ───────────────────────────────────────
+// ── create ────────────────────────────────────────────────
 async function onCreate(e) {
   e.preventDefault();
   const accountId = $('createAccount')?.value || state.createAccountId;
+  const calendarId = $('createCalendar')?.value || state.createCalendarId || 'primary';
   const acc = accountById(state, accountId);
   if (!acc || acc.stale) {
     toast('有効な作成先アカウントを選んでください', 'error');
@@ -367,55 +454,49 @@ async function onCreate(e) {
   const startLocal = $('eventStart')?.value || '';
   const endLocal = $('eventEnd')?.value || '';
   const description = ($('eventDesc')?.value || '').trim();
+  const location = ($('eventLocation')?.value || '').trim();
+  const rrule = $('eventRecur')?.value || '';
+
   if (!summary) {
     toast('タイトルを入力してください', 'error');
     return;
   }
-
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  let resource;
-
-  if (allDay) {
-    const s = (startLocal || state.selectedDate).slice(0, 10);
-    let eDate = (endLocal || s).slice(0, 10);
-    // end must be exclusive → +1 day
-    const ed = parseYmd(eDate);
-    ed.setDate(ed.getDate() + 1);
-    eDate = toYmd(ed);
-    resource = {
-      summary,
-      description: description || undefined,
-      start: { date: s },
-      end: { date: eDate },
-    };
-  } else {
-    if (!startLocal || !endLocal) {
-      toast('開始・終了を入力してください', 'error');
-      return;
-    }
+  if (!allDay && (!startLocal || !endLocal)) {
+    toast('開始・終了を入力してください', 'error');
+    return;
+  }
+  if (!allDay) {
     const start = new Date(startLocal);
     const end = new Date(endLocal);
     if (!(end > start)) {
       toast('終了は開始より後にしてください', 'error');
       return;
     }
-    resource = {
-      summary,
-      description: description || undefined,
-      start: { dateTime: start.toISOString(), timeZone: tz },
-      end: { dateTime: end.toISOString(), timeZone: tz },
-    };
   }
+
+  const resource = buildEventResource({
+    summary,
+    description,
+    location,
+    allDay,
+    startLocal: startLocal || state.selectedDate,
+    endLocal: endLocal || startLocal || state.selectedDate,
+    rrule: rrule || undefined,
+    timeZone: tz(),
+  });
 
   setDisabled('createBtn', true);
   setLoading(true, `${acc.email} に作成中…`);
   try {
-    await insertEvent(state, accountId, resource, 'primary');
+    await insertEvent(state, accountId, resource, calendarId);
     state.createAccountId = accountId;
+    state.createCalendarId = calendarId;
     persistAccounts(state);
     setProp('eventTitle', 'value', '');
     setProp('eventDesc', 'value', '');
+    setProp('eventLocation', 'value', '');
     setProp('eventAllDay', 'checked', false);
+    setProp('eventRecur', 'value', '');
     setProp('eventStart', 'type', 'datetime-local');
     setProp('eventEnd', 'type', 'datetime-local');
     fillDefaultTimes(state.selectedDate);
@@ -430,8 +511,20 @@ async function onCreate(e) {
   }
 }
 
+// ── edit / delete / drag ──────────────────────────────────
+function openEdit(ev) {
+  state.editingEvent = ev;
+  fillEditForm(ev);
+  openEditModal();
+}
+
 function askDelete(ev) {
-  state.pendingDelete = ev;
+  if (ev.isRecurring || ev.recurringEventId) {
+    pendingRecurAction = { type: 'delete', ev };
+    openRecurScopeModal('delete');
+    return;
+  }
+  state.pendingDelete = { ev, scope: 'single' };
   setProp(
     'confirmText',
     'textContent',
@@ -441,15 +534,19 @@ function askDelete(ev) {
 }
 
 async function confirmDelete() {
-  const ev = state.pendingDelete;
+  const pending = state.pendingDelete;
   state.pendingDelete = null;
   $('confirmModal')?.classList.remove('open');
-  if (!ev) return;
+  if (!pending?.ev) return;
+  const { ev, scope } = pending;
 
   setLoading(true, '削除中…');
   try {
-    await apiDeleteEvent(state, ev.accountId, ev.id, ev.calendarId || 'primary');
-    toast('削除しました', 'ok');
+    await apiDeleteEvent(state, ev.accountId, ev.id, ev.calendarId || 'primary', {
+      scope: scope || 'single',
+      recurringEventId: ev.recurringEventId,
+    });
+    toast(scope === 'all' ? 'シリーズを削除しました' : '削除しました', 'ok');
     await fetchAll();
   } catch (err) {
     console.error(err);
@@ -457,6 +554,140 @@ async function confirmDelete() {
   } finally {
     setLoading(false);
   }
+}
+
+async function onEditSave(e) {
+  e.preventDefault();
+  const ev = state.editingEvent;
+  if (!ev) return;
+
+  const summary = ($('editTitle')?.value || '').trim();
+  const description = ($('editDesc')?.value || '').trim();
+  const location = ($('editLocation')?.value || '').trim();
+  const allDay = !!$('editAllDay')?.checked;
+  const startLocal = $('editStart')?.value || '';
+  const endLocal = $('editEnd')?.value || '';
+
+  if (!summary) {
+    toast('タイトルを入力してください', 'error');
+    return;
+  }
+
+  const apply = async (scope) => {
+    const resource = buildEventResource({
+      summary,
+      description,
+      location,
+      allDay,
+      startLocal,
+      endLocal,
+      timeZone: tz(),
+    });
+    // Don't send recurrence on instance patch unless editing master
+    setLoading(true, '保存中…');
+    try {
+      await patchEvent(state, ev.accountId, ev.id, resource, ev.calendarId || 'primary', {
+        scope,
+        recurringEventId: ev.recurringEventId,
+      });
+      closeEditModal();
+      state.editingEvent = null;
+      toast(scope === 'all' ? 'シリーズを更新しました' : '更新しました', 'ok');
+      await fetchAll();
+    } catch (err) {
+      console.error(err);
+      toast('更新失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (ev.isRecurring || ev.recurringEventId) {
+    pendingRecurAction = {
+      type: 'edit',
+      ev,
+      run: apply,
+    };
+    openRecurScopeModal('edit');
+    return;
+  }
+  await apply('single');
+}
+
+async function handleDrop(uid, ymd, timeHint) {
+  const ev = eventByUid(state, uid);
+  if (!ev) return;
+  if (accountById(state, ev.accountId)?.stale) {
+    toast('再連携が必要です', 'error');
+    return;
+  }
+
+  let times;
+  if (timeHint && !ev.allDay) {
+    const oldS = new Date(ev.start);
+    const oldE = new Date(ev.end);
+    const dur = oldE - oldS;
+    const start = parseYmd(ymd);
+    start.setHours(timeHint.hour, timeHint.minute, 0, 0);
+    const end = new Date(start.getTime() + dur);
+    times = { start: start.toISOString(), end: end.toISOString(), allDay: false };
+  } else if (timeHint && ev.allDay) {
+    // dropping all-day onto timed slot → keep all-day on that date
+    times = moveEventToDate(ev, ymd);
+  } else {
+    times = moveEventToDate(ev, ymd);
+  }
+
+  // no-op?
+  if (times.allDay && times.start === ev.start && times.end === ev.end) return;
+  if (!times.allDay && times.start === ev.start && times.end === ev.end) return;
+
+  const doMove = async (scope) => {
+    const resource = buildTimePatch(ev, times, tz());
+    setLoading(true, '移動中…');
+    try {
+      await patchEvent(state, ev.accountId, ev.id, resource, ev.calendarId || 'primary', {
+        scope,
+        recurringEventId: ev.recurringEventId,
+      });
+      toast('移動しました', 'ok');
+      await fetchAll();
+    } catch (err) {
+      console.error(err);
+      toast('移動失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (ev.isRecurring || ev.recurringEventId) {
+    pendingRecurAction = { type: 'move', ev, run: doMove };
+    openRecurScopeModal('edit');
+    return;
+  }
+  await doMove('single');
+}
+
+function resolveRecurScope(scope) {
+  closeRecurScopeModal();
+  const action = pendingRecurAction;
+  pendingRecurAction = null;
+  if (!action) return;
+
+  if (action.type === 'delete') {
+    state.pendingDelete = { ev: action.ev, scope };
+    setProp(
+      'confirmText',
+      'textContent',
+      scope === 'all'
+        ? `「${action.ev.summary}」のシリーズ全体を削除しますか？`
+        : `「${action.ev.summary}」のこの回だけ削除しますか？`
+    );
+    $('confirmModal')?.classList.add('open');
+    return;
+  }
+
+  if (action.run) action.run(scope);
 }
 
 // ── settings / wire ───────────────────────────────────────
@@ -476,6 +707,8 @@ function on(id, event, fn) {
 }
 
 function wire() {
+  renderRecurSelect();
+
   on('settingsBtn', 'click', openSettings);
   $('settingsModal')?.addEventListener('click', (ev) => {
     if (ev.target === $('settingsModal') || ev.target.hasAttribute?.('data-close-settings')) {
@@ -512,12 +745,18 @@ function wire() {
 
   on('createAccount', 'change', (e) => {
     state.createAccountId = e.target.value;
+    renderCalendarSelect(state);
     persistAccounts(state);
     paint();
   });
 
-  on('prevMonthBtn', 'click', () => shiftMonth(-1));
-  on('nextMonthBtn', 'click', () => shiftMonth(1));
+  on('createCalendar', 'change', (e) => {
+    state.createCalendarId = e.target.value;
+    persistAccounts(state);
+  });
+
+  on('prevMonthBtn', 'click', () => shiftView(-1));
+  on('nextMonthBtn', 'click', () => shiftView(1));
 
   on('todayBtn', 'click', async () => {
     const now = new Date();
@@ -530,6 +769,12 @@ function wire() {
     if (liveAccounts(state).length) await fetchAll();
   });
 
+  // View toggle
+  $('viewToggle')?.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('[data-view]');
+    if (btn) setViewMode(btn.dataset.view);
+  });
+
   on('createForm', 'submit', onCreate);
 
   on('eventAllDay', 'change', (e) => {
@@ -537,6 +782,43 @@ function wire() {
     setProp('eventStart', 'type', onAllDay ? 'date' : 'datetime-local');
     setProp('eventEnd', 'type', onAllDay ? 'date' : 'datetime-local');
     fillDefaultTimes(state.selectedDate);
+  });
+
+  // Edit modal
+  on('editForm', 'submit', onEditSave);
+  on('editCancel', 'click', () => {
+    state.editingEvent = null;
+    closeEditModal();
+  });
+  $('editModal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('editModal') || ev.target.hasAttribute?.('data-close-edit')) {
+      state.editingEvent = null;
+      closeEditModal();
+    }
+  });
+  on('editAllDay', 'change', (e) => {
+    const onAllDay = e.target.checked;
+    setProp('editStart', 'type', onAllDay ? 'date' : 'datetime-local');
+    setProp('editEnd', 'type', onAllDay ? 'date' : 'datetime-local');
+  });
+  on('editDelete', 'click', () => {
+    const ev = state.editingEvent;
+    closeEditModal();
+    if (ev) askDelete(ev);
+  });
+
+  // Recur scope
+  on('recurScopeSingle', 'click', () => resolveRecurScope('single'));
+  on('recurScopeAll', 'click', () => resolveRecurScope('all'));
+  on('recurScopeCancel', 'click', () => {
+    pendingRecurAction = null;
+    closeRecurScopeModal();
+  });
+  $('recurScopeModal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('recurScopeModal')) {
+      pendingRecurAction = null;
+      closeRecurScopeModal();
+    }
   });
 
   on('confirmCancel', 'click', () => {
@@ -557,11 +839,16 @@ function wire() {
     if (e.key === 'Escape') {
       closeAccountMenu();
       closeSettings();
+      closeEditModal();
+      closeRecurScopeModal();
       $('confirmModal')?.classList.remove('open');
     }
     if (e.key === 'ArrowLeft') $('prevMonthBtn')?.click();
     if (e.key === 'ArrowRight') $('nextMonthBtn')?.click();
     if (e.key === 't' || e.key === 'T') $('todayBtn')?.click();
+    if (e.key === 'm' || e.key === 'M') setViewMode(VIEWS.month);
+    if (e.key === 'w' || e.key === 'W') setViewMode(VIEWS.week);
+    if (e.key === 'l' || e.key === 'L') setViewMode(VIEWS.list);
   });
 }
 
@@ -571,7 +858,6 @@ async function boot() {
   restoreAccounts(state);
 
   const now = new Date();
-  // Only default view if not restored from storage
   if (!state.viewYear) {
     state.viewYear = now.getFullYear();
     state.viewMonth = now.getMonth();
@@ -579,8 +865,9 @@ async function boot() {
   if (!state.selectedDate) {
     state.selectedDate = toYmd(now);
   }
-  // If restored selectedDate is outside restored month, clamp
-  state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
+  if (state.viewMode === VIEWS.month || state.viewMode === VIEWS.list) {
+    state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
+  }
   fillDefaultTimes(state.selectedDate);
 
   const cached = await loadCachedEvents();
