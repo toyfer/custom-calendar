@@ -1,5 +1,6 @@
-/* Overlay-first chip states + form select + event extras (extends base theme) */
+/* Overlay chips + week/list views + drag + mobile + edit extras */
 
+/* ── Chip states ─────────────────────────────────────────── */
 .chip.visible {
   border-color: color-mix(in srgb, var(--chip-color, var(--accent)) 55%, var(--border));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-color, var(--accent)) 25%, transparent);
@@ -27,16 +28,34 @@
   color: var(--text-muted);
   padding: 0 0.1rem;
   flex-shrink: 0;
+  min-width: 1.2rem;
+  min-height: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .chip-menu-btn:hover {
   color: var(--text);
 }
 
+.chip {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .panel-hint {
   margin: 0;
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+.header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
 }
 
 .account-select-full {
@@ -55,7 +74,59 @@
   font-size: 0.7rem;
 }
 
-/* Event list extras */
+/* ── View toggle ─────────────────────────────────────────── */
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.view-toggle button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.view-toggle button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.view-toggle button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ── Drop / drag ─────────────────────────────────────────── */
+.day.drop-target,
+.week-col.drop-target,
+.week-allday-cell.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft) !important;
+}
+
+.event-mini.dragging,
+.week-event.dragging,
+.week-allday-pill.dragging {
+  opacity: 0.45;
+}
+
+.event-mini[draggable='true'] {
+  cursor: grab;
+}
+
+.event-mini[draggable='true']:active {
+  cursor: grabbing;
+}
+
+/* ── Event list extras ───────────────────────────────────── */
 .event-actions {
   display: flex;
   flex-direction: column;
@@ -88,12 +159,18 @@
   margin-top: 0.15rem;
 }
 
-.event-card .cal-badge {
+.event-card .cal-badge,
+.event-card .recur-badge {
   font-size: 0.7rem;
   color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.05rem 0.4rem;
+}
+
+.event-card .recur-badge {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
 .event-card.all-day .title::before {
@@ -124,4 +201,427 @@
 
 .account-menu button.menu-danger:hover {
   background: rgba(255, 107, 122, 0.12);
+}
+
+.form-actions-col {
+  flex-direction: column;
+  align-items: stretch !important;
+}
+
+.form-actions-col button {
+  width: 100%;
+}
+
+/* ── Week view ───────────────────────────────────────────── */
+.week-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  max-height: min(70vh, 720px);
+}
+
+.week-head {
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.week-gutter-head {
+  border-right: 1px solid var(--border-soft);
+}
+
+.week-day-head {
+  text-align: center;
+  padding: 0.45rem 0.2rem;
+  cursor: pointer;
+  border-left: 1px solid var(--border-soft);
+  transition: background 0.12s;
+}
+
+.week-day-head:hover {
+  background: var(--bg-hover);
+}
+
+.week-day-head .wd {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.week-day-head .dn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-top: 0.1rem;
+}
+
+.week-day-head.today .dn {
+  background: var(--accent);
+  color: #0b1020;
+}
+
+.week-day-head.selected {
+  background: var(--accent-soft);
+}
+
+.week-day-head.sun .wd,
+.week-day-head.sun .dn {
+  color: #ff9aa6;
+}
+
+.week-day-head.sat .wd,
+.week-day-head.sat .dn {
+  color: #9bc4ff;
+}
+
+.week-day-head.today.sun .dn,
+.week-day-head.today.sat .dn {
+  color: #0b1020;
+}
+
+.week-allday {
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  border-bottom: 1px solid var(--border-soft);
+  min-height: 2.2rem;
+  background: var(--bg-sun);
+}
+
+.week-gutter {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid var(--border-soft);
+  padding: 0.2rem;
+}
+
+.week-allday-cell {
+  border-left: 1px solid var(--border-soft);
+  padding: 0.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-height: 2rem;
+}
+
+.week-allday-pill {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  padding: 0.12rem 0.3rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ev-color, var(--accent)) 28%, transparent);
+  color: color-mix(in srgb, var(--ev-color, var(--accent)) 45%, white);
+  border-left: 2px solid var(--ev-color, var(--accent));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+}
+
+.week-body {
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  position: relative;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  height: var(--week-h, 1248px);
+  max-height: min(58vh, 560px);
+}
+
+.week-gutter-col {
+  position: relative;
+  border-right: 1px solid var(--border-soft);
+  height: var(--week-h, 1248px);
+}
+
+.week-hour-label {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.week-col {
+  position: relative;
+  height: var(--week-h, 1248px);
+  border-left: 1px solid var(--border-soft);
+  background: var(--bg-sun);
+  cursor: crosshair;
+}
+
+.week-col.today {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-sun));
+}
+
+.week-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-soft);
+  pointer-events: none;
+}
+
+.week-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--danger);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.week-now::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.week-event {
+  position: absolute;
+  z-index: 2;
+  border-radius: 6px;
+  padding: 0.2rem 0.35rem;
+  overflow: hidden;
+  cursor: grab;
+  background: color-mix(in srgb, var(--ev-color, var(--accent)) 32%, #0c0e14);
+  border: 1px solid color-mix(in srgb, var(--ev-color, var(--accent)) 55%, transparent);
+  border-left: 3px solid var(--ev-color, var(--accent));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  font-size: 0.7rem;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.week-event strong {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-event span {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+}
+
+.week-event:hover {
+  filter: brightness(1.08);
+  z-index: 4;
+}
+
+/* ── List view ───────────────────────────────────────────── */
+.list-view {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+  padding: 0.5rem 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.list-day {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.list-day.today {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.list-day.selected {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.list-day-head {
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  padding: 0.55rem 0.75rem;
+  font-weight: 650;
+  font-size: 0.85rem;
+}
+
+.list-day-head:hover {
+  background: var(--bg-hover);
+}
+
+.list-event {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 5.5rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  border-left: 3px solid var(--ev-color, var(--accent));
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.list-event:last-child {
+  border-bottom: none;
+}
+
+.list-event:hover {
+  background: var(--bg-hover);
+}
+
+.list-time {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.list-title {
+  font-weight: 600;
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-acct {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--ev-color, var(--accent)) 40%, white);
+  white-space: nowrap;
+}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .hide-mobile {
+    display: none !important;
+  }
+
+  .header-right {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .view-toggle {
+    width: 100%;
+  }
+
+  .view-toggle button {
+    flex: 1;
+  }
+
+  .week-body {
+    max-height: min(50vh, 420px);
+  }
+
+  .week-head,
+  .week-allday,
+  .week-body {
+    grid-template-columns: 40px repeat(7, minmax(48px, 1fr));
+  }
+
+  .week-view {
+    overflow-x: auto;
+  }
+
+  .week-event strong {
+    font-size: 0.65rem;
+  }
+
+  .week-event span {
+    display: none;
+  }
+
+  .chip {
+    max-width: 140px;
+    min-height: 2rem;
+  }
+
+  .chip-menu-btn {
+    min-width: 1.6rem;
+    min-height: 1.6rem;
+  }
+
+  .event-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .list-event {
+    grid-template-columns: 4.2rem 1fr;
+  }
+
+  .list-acct {
+    grid-column: 2;
+  }
+
+  /* Larger touch targets for day cells on month */
+  .day {
+    min-height: 72px;
+  }
+}
+
+@media (max-width: 520px) {
+  .brand span {
+    display: none;
+  }
+
+  .topbar {
+    gap: 0.5rem;
+  }
+
+  .account-bar {
+    order: 10;
+    width: 100%;
+    border-right: none;
+    padding-right: 0;
+    margin-right: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .account-chips {
+    flex-wrap: nowrap;
+  }
+
+  .week-head,
+  .week-allday,
+  .week-body {
+    min-width: 520px;
+  }
+}
+
+/* Prevent pull-to-refresh fighting with week scroll on some mobile browsers */
+.week-body {
+  overscroll-behavior: contain;
+}
+
+.list-view {
+  overscroll-behavior: contain;
 }
