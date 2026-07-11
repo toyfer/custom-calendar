@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Custom Calendar</title>
+    <meta
+      name="description"
+      content="Self-hosted custom UI for Google Calendar (static GitHub Pages app)"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Custom Calendar</h1>
+          <span>Google Calendar データを自作 UI で表示・操作</span>
+        </div>
+        <div class="actions">
+          <span id="statusPill" class="status-pill">未接続</span>
+          <button id="settingsBtn" class="ghost" type="button">設定</button>
+          <button id="authBtn" class="primary" type="button" disabled>Google で連携</button>
+          <button id="signoutBtn" class="ghost" type="button" hidden>切断</button>
+          <button id="refreshBtn" class="ghost" type="button" disabled>再取得</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>月表示</h2>
+            <div class="month-nav">
+              <button id="prevMonthBtn" type="button" aria-label="前月">‹</button>
+              <div id="monthLabel" class="month-label">—</div>
+              <button id="nextMonthBtn" type="button" aria-label="翌月">›</button>
+              <button id="todayBtn" class="ghost" type="button">今日</button>
+            </div>
+          </div>
+          <div id="calendarGrid" class="calendar-grid" aria-label="カレンダー"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>選択日の予定</h2>
+          </div>
+          <div class="side-body">
+            <div id="selectedDateLabel" class="selected-date">日付を選択</div>
+            <div id="eventList" class="event-list">
+              <div class="empty">Google と連携すると予定が表示されます。</div>
+            </div>
+
+            <form id="createForm" class="form">
+              <h3>予定を追加</h3>
+              <label>
+                タイトル
+                <input id="eventTitle" type="text" required placeholder="例: 打ち合わせ" />
+              </label>
+              <label>
+                開始
+                <input id="eventStart" type="datetime-local" required />
+              </label>
+              <label>
+                終了
+                <input id="eventEnd" type="datetime-local" required />
+              </label>
+              <label>
+                メモ
+                <textarea id="eventDesc" placeholder="任意"></textarea>
+              </label>
+              <div class="form-actions">
+                <button id="createBtn" class="primary" type="submit" disabled>作成</button>
+              </div>
+              <p class="hint">
+                スコープ <code>calendar.events</code> が必要です。OAuth 設定後に有効になります。
+              </p>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h3>OAuth 設定</h3>
+        <p>
+          Google Cloud で発行した <strong>Client ID</strong> と <strong>API Key</strong> を入力します。
+          値はブラウザの localStorage に保存され、空の <code>config.json</code> より優先されます。
+        </p>
+        <form id="settingsForm" class="form">
+          <label>
+            Client ID
+            <input
+              id="cfgClientId"
+              type="text"
+              placeholder="xxxx.apps.googleusercontent.com"
+              autocomplete="off"
+            />
+          </label>
+          <label>
+            API Key
+            <input id="cfgApiKey" type="text" placeholder="AIza..." autocomplete="off" />
+          </label>
+          <p class="hint">
+            Authorized JavaScript origins に
+            <code>https://toyfer.github.io</code> と localhost を追加してください。Client Secret は不要です。
+          </p>
+          <div class="form-actions">
+            <button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button>
+            <button class="ghost" type="button" data-close-settings>閉じる</button>
+            <button class="primary" type="submit">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="./app.js"></script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="window.__gapiLoaded && window.__gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="window.__gisLoaded && window.__gisLoaded()"></script>
+  </body>
+</html>
