@@ -7,6 +7,7 @@
 
 import { cacheEvents, loadCachedEvents } from './cache.js';
 import {
+  clampYmdToMonth,
   defaultRangeForDay,
   parseYmd,
   toLocalInputValue,
@@ -20,6 +21,7 @@ import {
   initTokenClient,
   insertEvent,
   revokeAndRemove,
+  trySilentRefresh,
 } from './google.js';
 import {
   accountById,
@@ -49,6 +51,10 @@ import {
 } from './ui.js';
 
 const state = createState();
+
+// Serialize month fetches so rapid ←/→ don't race
+let fetchSeq = 0;
+let fetchInFlight = null;
 
 // ── render helpers ────────────────────────────────────────
 function paint() {
@@ -87,7 +93,19 @@ function paint() {
 
   renderCalendar(state, (ymd) => {
     state.selectedDate = ymd;
+    // Selecting a muted (adjacent month) day → jump view to that month
+    const d = parseYmd(ymd);
+    if (d.getFullYear() !== state.viewYear || d.getMonth() !== state.viewMonth) {
+      state.viewYear = d.getFullYear();
+      state.viewMonth = d.getMonth();
+      persistAccounts(state);
+      paint();
+      if (liveAccounts(state).length) fetchAll();
+      else fillDefaultTimes(ymd);
+      return;
+    }
     fillDefaultTimes(ymd);
+    persistAccounts(state);
     paint();
   });
 
@@ -108,6 +126,23 @@ function fillDefaultTimes(ymd) {
   const { start, end } = defaultRangeForDay(ymd);
   setProp('eventStart', 'value', toLocalInputValue(start));
   setProp('eventEnd', 'value', toLocalInputValue(end));
+}
+
+function shiftMonth(delta) {
+  state.viewMonth += delta;
+  if (state.viewMonth < 0) {
+    state.viewMonth = 11;
+    state.viewYear -= 1;
+  } else if (state.viewMonth > 11) {
+    state.viewMonth = 0;
+    state.viewYear += 1;
+  }
+  state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
+  fillDefaultTimes(state.selectedDate);
+  persistAccounts(state);
+  paint();
+  if (liveAccounts(state).length) return fetchAll();
+  return Promise.resolve();
 }
 
 // ── Google bootstrapping ──────────────────────────────────
@@ -159,6 +194,7 @@ async function addAccount() {
     setLoading(true, 'Google アカウントを選択…');
     const account = await connectAccount(state, { mode: 'add' });
     toast(`${account.email} を追加（重ね表示に合流）`, 'ok');
+    state.lastFetchNote = '';
     showBanner('');
     paint();
     await fetchAll();
@@ -183,9 +219,9 @@ async function reauth(accountId) {
   if (!acc) return;
   try {
     setLoading(true, `${acc.email} を再連携…`);
-    // force consent so new calendarlist scope is granted
     const account = await connectAccount(state, { mode: 'reauth', hintEmail: acc.email });
     toast(`${account.email} を再連携しました（スコープ更新）`, 'ok');
+    state.lastFetchNote = '';
     paint();
     await fetchAll();
   } catch (err) {
@@ -208,77 +244,111 @@ async function removeAccount(accountId) {
 
 // ── data ──────────────────────────────────────────────────
 async function fetchAll() {
-  const targets = liveAccounts(state);
-  if (!targets.length) {
-    paint();
-    toast('有効なアカウントがありません。再連携してください', 'error');
-    return;
+  // Coalesce concurrent calls — only the latest month window matters
+  const mySeq = ++fetchSeq;
+  if (fetchInFlight) {
+    // let previous settle; we'll re-run if still latest
+    try {
+      await fetchInFlight;
+    } catch {
+      /* ignore */
+    }
+    if (mySeq !== fetchSeq) return;
   }
 
-  setLoading(true, '全カレンダーから予定を取得中…');
-  try {
-    const results = await Promise.allSettled(targets.map((a) => fetchEventsForAccount(state, a)));
-    const merged = [];
-    const metas = [];
-    let fail = 0;
-
-    results.forEach((r, i) => {
-      if (r.status === 'fulfilled') {
-        // new shape: { events, meta }
-        const payload = r.value;
-        const events = Array.isArray(payload) ? payload : payload.events || [];
-        const meta = Array.isArray(payload) ? null : payload.meta;
-        merged.push(...events);
-        if (meta) metas.push(meta);
-      } else {
-        fail += 1;
-        console.error(targets[i].email, r.reason);
-        const msg = String(r.reason?.message || r.reason || '');
-        if (
-          msg.includes('expired') ||
-          msg.includes('Login Required') ||
-          msg.includes('401') ||
-          r.reason?.status === 401
-        ) {
-          targets[i].stale = true;
-        }
+  const run = (async () => {
+    // Attempt silent refresh for near-expired tokens first
+    for (const a of state.accounts) {
+      const tok = state.tokens[a.id];
+      if (tok?.accessToken && tok.expiresAt && tok.expiresAt < Date.now() + 120_000) {
+        await trySilentRefresh(state, a.id);
       }
-    });
-
-    const liveIds = new Set(targets.map((a) => a.id));
-    const kept = state.events.filter((e) => !liveIds.has(e.accountId));
-    state.events = [...kept, ...merged];
-    await cacheEvents(state.events);
-    persistAccounts(state);
-    paint();
-
-    // Human-readable summary
-    if (fail && !merged.length) {
-      toast(`${fail} アカウントの取得に失敗（コンソールを確認）`, 'error');
-    } else if (!merged.length) {
-      const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
-      toast(
-        `0 件（カレンダー ${calCount || '?'} 個を走査）。表示月を確認 / 再連携でスコープ更新`,
-        'error'
-      );
-      showBanner(
-        `取得は成功しましたが <strong>0 件</strong> でした。` +
-          `（走査カレンダー数: ${calCount || '不明'}）` +
-          ` 別月に予定がある・または権限不足の可能性があります。` +
-          ` チップの ▾ → <strong>再連携</strong> で新しいスコープを許可してください。`
-      );
-      console.info('[calendar] fetch meta', metas);
-    } else {
-      const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
-      toast(`更新 ${merged.length} 件 / カレンダー ${calCount || '?'} 個`, 'ok');
-      showBanner('');
-      console.info('[calendar] fetch meta', metas);
     }
-  } catch (err) {
-    console.error(err);
-    toast('取得失敗: ' + (err?.message || err), 'error');
+
+    const targets = liveAccounts(state);
+    if (!targets.length) {
+      paint();
+      toast('有効なアカウントがありません。再連携してください', 'error');
+      return;
+    }
+
+    setLoading(true, '全カレンダーから予定を取得中…');
+    try {
+      const results = await Promise.allSettled(targets.map((a) => fetchEventsForAccount(state, a)));
+      if (mySeq !== fetchSeq) return; // superseded by newer month nav
+
+      const merged = [];
+      const metas = [];
+      let fail = 0;
+
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          const payload = r.value;
+          const events = Array.isArray(payload) ? payload : payload.events || [];
+          const meta = Array.isArray(payload) ? null : payload.meta;
+          merged.push(...events);
+          if (meta) metas.push(meta);
+        } else {
+          fail += 1;
+          console.error(targets[i].email, r.reason);
+          const msg = String(r.reason?.message || r.reason || '');
+          if (
+            msg.includes('expired') ||
+            msg.includes('Login Required') ||
+            msg.includes('401') ||
+            r.reason?.status === 401
+          ) {
+            targets[i].stale = true;
+          }
+        }
+      });
+
+      const liveIds = new Set(targets.map((a) => a.id));
+      const kept = state.events.filter((e) => !liveIds.has(e.accountId));
+      state.events = [...kept, ...merged];
+      await cacheEvents(state.events);
+      persistAccounts(state);
+
+      if (fail && !merged.length) {
+        state.lastFetchNote = 'fail';
+        toast(`${fail} アカウントの取得に失敗（コンソールを確認）`, 'error');
+        showBanner('予定の取得に失敗しました。再連携または ↻ を試してください。');
+      } else if (!merged.length) {
+        const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
+        state.lastFetchNote = 'empty';
+        toast(
+          `0 件（カレンダー ${calCount || '?'} 個を走査）。表示月を確認 / 再連携でスコープ更新`,
+          'error'
+        );
+        showBanner(
+          `取得は成功しましたが <strong>0 件</strong> でした。` +
+            `（走査カレンダー数: ${calCount || '不明'}）` +
+            ` 別月に予定がある・または権限不足の可能性があります。` +
+            ` チップの ▾ → <strong>再連携</strong> で新しいスコープを許可してください。`
+        );
+        console.info('[calendar] fetch meta', metas);
+      } else {
+        const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
+        state.lastFetchNote = '';
+        toast(`更新 ${merged.length} 件 / カレンダー ${calCount || '?'} 個`, 'ok');
+        showBanner('');
+        console.info('[calendar] fetch meta', metas);
+      }
+
+      paint();
+    } catch (err) {
+      console.error(err);
+      toast('取得失敗: ' + (err?.message || err), 'error');
+    } finally {
+      if (mySeq === fetchSeq) setLoading(false);
+    }
+  })();
+
+  fetchInFlight = run;
+  try {
+    await run;
   } finally {
-    setLoading(false);
+    if (fetchInFlight === run) fetchInFlight = null;
   }
 }
 
@@ -308,6 +378,7 @@ async function onCreate(e) {
   if (allDay) {
     const s = (startLocal || state.selectedDate).slice(0, 10);
     let eDate = (endLocal || s).slice(0, 10);
+    // end must be exclusive → +1 day
     const ed = parseYmd(eDate);
     ed.setDate(ed.getDate() + 1);
     eDate = toYmd(ed);
@@ -352,7 +423,7 @@ async function onCreate(e) {
     await fetchAll();
   } catch (err) {
     console.error(err);
-    toast('作成失敗: ' + (err?.result?.error?.message || err?.message || err), 'error');
+    toast('作成失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
   } finally {
     setLoading(false);
     setDisabled('createBtn', liveAccounts(state).length === 0);
@@ -361,7 +432,11 @@ async function onCreate(e) {
 
 function askDelete(ev) {
   state.pendingDelete = ev;
-  setProp('confirmText', 'textContent', `「${ev.summary}」を削除しますか？（${ev.accountEmail}）`);
+  setProp(
+    'confirmText',
+    'textContent',
+    `「${ev.summary}」を削除しますか？（${ev.accountEmail}${ev.calendarName && ev.calendarName !== 'primary' ? ' / ' + ev.calendarName : ''}）`
+  );
   $('confirmModal')?.classList.add('open');
 }
 
@@ -378,7 +453,7 @@ async function confirmDelete() {
     await fetchAll();
   } catch (err) {
     console.error(err);
-    toast('削除失敗: ' + (err?.result?.error?.message || err?.message || err), 'error');
+    toast('削除失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
   } finally {
     setLoading(false);
   }
@@ -441,25 +516,8 @@ function wire() {
     paint();
   });
 
-  on('prevMonthBtn', 'click', async () => {
-    state.viewMonth -= 1;
-    if (state.viewMonth < 0) {
-      state.viewMonth = 11;
-      state.viewYear -= 1;
-    }
-    paint();
-    if (liveAccounts(state).length) await fetchAll();
-  });
-
-  on('nextMonthBtn', 'click', async () => {
-    state.viewMonth += 1;
-    if (state.viewMonth > 11) {
-      state.viewMonth = 0;
-      state.viewYear += 1;
-    }
-    paint();
-    if (liveAccounts(state).length) await fetchAll();
-  });
+  on('prevMonthBtn', 'click', () => shiftMonth(-1));
+  on('nextMonthBtn', 'click', () => shiftMonth(1));
 
   on('todayBtn', 'click', async () => {
     const now = new Date();
@@ -467,6 +525,7 @@ function wire() {
     state.viewMonth = now.getMonth();
     state.selectedDate = toYmd(now);
     fillDefaultTimes(state.selectedDate);
+    persistAccounts(state);
     paint();
     if (liveAccounts(state).length) await fetchAll();
   });
@@ -512,9 +571,16 @@ async function boot() {
   restoreAccounts(state);
 
   const now = new Date();
-  state.viewYear = now.getFullYear();
-  state.viewMonth = now.getMonth();
-  state.selectedDate = toYmd(now);
+  // Only default view if not restored from storage
+  if (!state.viewYear) {
+    state.viewYear = now.getFullYear();
+    state.viewMonth = now.getMonth();
+  }
+  if (!state.selectedDate) {
+    state.selectedDate = toYmd(now);
+  }
+  // If restored selectedDate is outside restored month, clamp
+  state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
   fillDefaultTimes(state.selectedDate);
 
   const cached = await loadCachedEvents();
@@ -528,7 +594,6 @@ async function boot() {
 
   paint();
 
-  // GIS is enough for token model; don't hard-depend on gapi for readiness
   if (window.gapi && hasValidConfig(state)) {
     try {
       await new Promise((resolve) => {
@@ -541,7 +606,6 @@ async function boot() {
       state.gapiReady = true;
     }
   } else {
-    // REST-only path
     state.gapiReady = true;
   }
 
