@@ -2,6 +2,7 @@
 
 import { DOW } from './constants.js';
 import {
+  compareEvents,
   eventOnDate,
   formatEventTime,
   formatMonthLabel,
@@ -83,7 +84,7 @@ export function escapeHtml(s) {
 function eventsForDate(state, ymd) {
   return overlayEvents(state)
     .filter((ev) => eventOnDate(ev, ymd))
-    .sort((a, b) => String(a.start).localeCompare(String(b.start)));
+    .sort(compareEvents);
 }
 
 export function renderAccounts(state, handlers) {
@@ -103,7 +104,6 @@ export function renderAccounts(state, handlers) {
     setDisabled('refreshBtn', true);
     setDisabled('createBtn', true);
     setDisabled('addAccountBtn', !canAuth);
-    // emptyAuthBtn lives inside #eventList and is recreated by renderEventList
     renderCreateSelect(state);
     renderLegend(state);
     return;
@@ -168,7 +168,8 @@ export function renderAccounts(state, handlers) {
     }
 
     chip.addEventListener('click', (ev) => {
-      if (ev.detail === 0) return;
+      // Ignore synthetic clicks (keyboard activate fires detail=0 on some browsers)
+      if (ev.detail === 0 && ev.pointerType === '') return;
       handlers.onToggleVisible(a.id);
     });
 
@@ -202,15 +203,21 @@ function updateStatusBanner(state) {
 
   if (live === 0) {
     setStatus('再連携が必要', 'warn');
-    showBanner(
-      'セッションのトークンが切れています。アカウントの <strong>▾</strong> から「再連携」、または「+ アカウント」で追加してください。'
-    );
+    // Prefer fetch diagnostic if present; otherwise token message
+    if (!state.lastFetchNote) {
+      showBanner(
+        'セッションのトークンが切れています。アカウントの <strong>▾</strong> から「再連携」、または「+ アカウント」で追加してください。'
+      );
+    }
   } else if (live < total) {
     setStatus(`${live}/${total} 有効 · 表示 ${vis}`, 'warn');
-    showBanner('一部アカウントのトークンが切れています。▾ メニューから再連携できます。');
+    if (!state.lastFetchNote) {
+      showBanner('一部アカウントのトークンが切れています。▾ メニューから再連携できます。');
+    }
   } else {
     setStatus(`${total} アカウント · 重ね表示 ${vis}`, 'ok');
-    showBanner('');
+    // Only clear banner if no pending fetch note
+    if (!state.lastFetchNote) showBanner('');
   }
 }
 
@@ -301,14 +308,15 @@ export function renderCalendar(state, onSelectDate) {
     const dayEvents = eventsForDate(state, ymd);
     for (const ev of dayEvents.slice(0, 3)) {
       const mini = document.createElement('div');
-      mini.className = 'event-mini';
+      mini.className = 'event-mini' + (ev.allDay ? ' all-day' : '');
       mini.style.setProperty('--ev-color', ev.color);
       mini.textContent = ev.summary;
+      mini.title = `${ev.summary}\n${formatEventTime(ev)} · ${ev.accountEmail}`;
       el.appendChild(mini);
     }
     if (dayEvents.length > 3) {
       const more = document.createElement('div');
-      more.className = 'event-mini';
+      more.className = 'event-mini more';
       more.textContent = `+${dayEvents.length - 3}`;
       el.appendChild(more);
     }
@@ -369,29 +377,60 @@ export function renderEventList(state, handlers) {
   list.innerHTML = '';
   for (const ev of items) {
     const card = document.createElement('div');
-    card.className = 'event-card';
+    card.className = 'event-card' + (ev.allDay ? ' all-day' : '');
     card.style.setProperty('--ev-color', ev.color);
 
     const row = document.createElement('div');
     row.className = 'row';
 
     const left = document.createElement('div');
+    left.className = 'event-body';
+
     const title = document.createElement('div');
     title.className = 'title';
     title.textContent = ev.summary;
 
     const meta = document.createElement('div');
     meta.className = 'meta';
+    const calLabel =
+      ev.calendarName && ev.calendarName !== 'primary' && !String(ev.calendarId).includes('@')
+        ? escapeHtml(ev.calendarName)
+        : ev.calendarName && ev.calendarName !== 'primary'
+          ? escapeHtml(ev.calendarName)
+          : '';
     meta.innerHTML = `<span>${escapeHtml(formatEventTime(ev))}</span>
-      <span class="acct" style="--ev-color:${ev.color}">● ${escapeHtml(ev.accountEmail)}</span>`;
+      <span class="acct" style="--ev-color:${ev.color}">● ${escapeHtml(ev.accountEmail)}</span>
+      ${calLabel ? `<span class="cal-badge">${calLabel}</span>` : ''}`;
 
     left.appendChild(title);
     left.appendChild(meta);
+
+    if (ev.location) {
+      const loc = document.createElement('div');
+      loc.className = 'loc';
+      loc.textContent = '📍 ' + ev.location;
+      left.appendChild(loc);
+    }
+
     if (ev.description) {
       const desc = document.createElement('div');
       desc.className = 'desc';
       desc.textContent = ev.description;
       left.appendChild(desc);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'event-actions';
+
+    if (ev.htmlLink) {
+      const open = document.createElement('a');
+      open.className = 'ghost sm event-link';
+      open.href = ev.htmlLink;
+      open.target = '_blank';
+      open.rel = 'noopener noreferrer';
+      open.textContent = '開く';
+      open.title = 'Google Calendar で開く';
+      actions.appendChild(open);
     }
 
     const del = document.createElement('button');
@@ -400,9 +439,10 @@ export function renderEventList(state, handlers) {
     del.textContent = '削除';
     del.disabled = !!accountById(state, ev.accountId)?.stale;
     del.addEventListener('click', () => handlers.onDelete(ev));
+    actions.appendChild(del);
 
     row.appendChild(left);
-    row.appendChild(del);
+    row.appendChild(actions);
     card.appendChild(row);
     list.appendChild(card);
   }
@@ -422,11 +462,12 @@ export function openAccountMenu(account, anchor, actions) {
     (account.stale ? ' · 要再連携' : '');
   menu.appendChild(meta);
 
-  const mk = (label, fn) => {
+  const mk = (label, fn, danger = false) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.setAttribute('role', 'menuitem');
     b.textContent = label;
+    if (danger) b.classList.add('menu-danger');
     b.addEventListener('click', () => {
       closeAccountMenu();
       fn();
@@ -442,19 +483,27 @@ export function openAccountMenu(account, anchor, actions) {
   const sep = document.createElement('div');
   sep.className = 'sep';
   menu.appendChild(sep);
-  mk('このアカウントを外す', actions.remove);
+  mk('このアカウントを外す', actions.remove, true);
 
   const rect = anchor.getBoundingClientRect();
   menu.style.top = `${rect.bottom + 6}px`;
-  menu.style.left = `${Math.min(rect.left, window.innerWidth - 240)}px`;
+  menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 240))}px`;
+
+  // Remove previous outside-click listener if any
+  if (openAccountMenu._onDoc) {
+    document.removeEventListener('click', openAccountMenu._onDoc);
+    openAccountMenu._onDoc = null;
+  }
 
   setTimeout(() => {
     const onDoc = (e) => {
       if (!menu.contains(e.target) && !anchor.contains(e.target)) {
         closeAccountMenu();
         document.removeEventListener('click', onDoc);
+        if (openAccountMenu._onDoc === onDoc) openAccountMenu._onDoc = null;
       }
     };
+    openAccountMenu._onDoc = onDoc;
     document.addEventListener('click', onDoc);
   }, 0);
 }
@@ -462,4 +511,8 @@ export function openAccountMenu(account, anchor, actions) {
 export function closeAccountMenu() {
   const menu = $('accountMenu');
   if (menu) menu.hidden = true;
+  if (openAccountMenu._onDoc) {
+    document.removeEventListener('click', openAccountMenu._onDoc);
+    openAccountMenu._onDoc = null;
+  }
 }
