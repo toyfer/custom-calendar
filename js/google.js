@@ -1,4 +1,4 @@
-/** Google Identity + Calendar API access */
+/** Google Identity + Calendar API access (REST; no gapi.calendar dependency) */
 
 import { DISCOVERY_DOC, SCOPES } from './constants.js';
 import {
@@ -8,7 +8,9 @@ import {
   nextColor,
   persistAccounts,
 } from './state.js';
-import { endOfMonth, startOfMonth, toYmd } from './dates.js';
+import { startOfMonth, toYmd } from './dates.js';
+
+const CAL_BASE = 'https://www.googleapis.com/calendar/v3';
 
 export function normalizeEvent(item, account) {
   const allDay = !!item.start?.date && !item.start?.dateTime;
@@ -35,11 +37,24 @@ export function normalizeEvent(item, account) {
   };
 }
 
+/**
+ * Optional: keep gapi client init for compatibility.
+ * Calendar CRUD uses REST below so discovery load failures don't break the app.
+ */
 export async function initGapiClient(state) {
-  await gapi.client.init({
-    apiKey: state.apiKey,
-    discoveryDocs: [DISCOVERY_DOC],
-  });
+  if (typeof gapi === 'undefined' || !gapi.client) {
+    state.gapiReady = true;
+    return;
+  }
+  try {
+    await gapi.client.init({
+      apiKey: state.apiKey,
+      discoveryDocs: [DISCOVERY_DOC],
+    });
+  } catch (err) {
+    // Non-fatal: we use REST for Calendar
+    console.warn('[calendar] gapi.client.init failed (using REST fallback)', err);
+  }
   state.gapiReady = true;
 }
 
@@ -49,10 +64,6 @@ export function initTokenClient(state, callback = () => {}) {
     scope: SCOPES,
     callback,
   });
-}
-
-export function applyToken(accessToken) {
-  gapi.client.setToken({ access_token: accessToken });
 }
 
 export async function fetchUserInfo(accessToken) {
@@ -123,7 +134,6 @@ export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {
 
   state.tokens[id] = { accessToken, expiresAt };
 
-  // Prefer create target = newly connected if none or previous missing
   if (!state.createAccountId || !accountById(state, state.createAccountId)) {
     state.createAccountId = id;
   }
@@ -150,7 +160,7 @@ export async function revokeAndRemove(state, accountId) {
   persistAccounts(state);
 }
 
-export async function withAccountToken(state, accountId, fn) {
+function getValidToken(state, accountId) {
   const tok = state.tokens[accountId];
   if (!tok?.accessToken) throw new Error('token missing');
   if (tok.expiresAt && tok.expiresAt < Date.now() + 15_000) {
@@ -159,44 +169,78 @@ export async function withAccountToken(state, accountId, fn) {
     persistAccounts(state);
     throw new Error('token expired');
   }
-  applyToken(tok.accessToken);
-  return fn();
+  return tok.accessToken;
+}
+
+/**
+ * Calendar API via REST + Bearer token.
+ * Safer for multi-account than gapi.client (single global token + discovery race).
+ */
+async function calendarRequest(accessToken, path, { method = 'GET', body } = {}) {
+  const res = await fetch(`${CAL_BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (res.status === 204) return null;
+
+  let data = null;
+  const text = await res.text();
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
+  }
+
+  if (!res.ok) {
+    const msg = data?.error?.message || res.statusText || `HTTP ${res.status}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 }
 
 export async function fetchEventsForAccount(state, account) {
-  return withAccountToken(state, account.id, async () => {
-    const timeMin = startOfMonth(state.viewYear, state.viewMonth).toISOString();
-    const timeMax = new Date(state.viewYear, state.viewMonth + 1, 7, 23, 59, 59).toISOString();
-    const res = await gapi.client.calendar.events.list({
-      calendarId: 'primary',
-      timeMin,
-      timeMax,
-      showDeleted: false,
-      singleEvents: true,
-      maxResults: 2500,
-      orderBy: 'startTime',
-    });
-    return (res.result.items || []).map((item) => normalizeEvent(item, account));
+  const accessToken = getValidToken(state, account.id);
+  const timeMin = startOfMonth(state.viewYear, state.viewMonth).toISOString();
+  const timeMax = new Date(state.viewYear, state.viewMonth + 1, 7, 23, 59, 59).toISOString();
+
+  const params = new URLSearchParams({
+    timeMin,
+    timeMax,
+    showDeleted: 'false',
+    singleEvents: 'true',
+    maxResults: '2500',
+    orderBy: 'startTime',
   });
+
+  const data = await calendarRequest(
+    accessToken,
+    `/calendars/primary/events?${params.toString()}`
+  );
+  return (data?.items || []).map((item) => normalizeEvent(item, account));
 }
 
 export async function insertEvent(state, accountId, resource) {
-  return withAccountToken(state, accountId, async () => {
-    await gapi.client.calendar.events.insert({
-      calendarId: 'primary',
-      resource,
-    });
+  const accessToken = getValidToken(state, accountId);
+  return calendarRequest(accessToken, '/calendars/primary/events', {
+    method: 'POST',
+    body: resource,
   });
 }
 
 export async function deleteEvent(state, accountId, eventId) {
-  return withAccountToken(state, accountId, async () => {
-    await gapi.client.calendar.events.delete({
-      calendarId: 'primary',
-      eventId,
-    });
+  const accessToken = getValidToken(state, accountId);
+  const id = encodeURIComponent(eventId);
+  return calendarRequest(accessToken, `/calendars/primary/events/${id}`, {
+    method: 'DELETE',
   });
 }
-
-// silence unused import warning in some tooling
-void endOfMonth;
