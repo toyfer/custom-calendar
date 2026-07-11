@@ -1,4 +1,4 @@
-/** Google Identity + Calendar API access (REST; no gapi.calendar dependency) */
+/** Google Identity + Calendar API access (REST; multi-calendar) */
 
 import { DISCOVERY_DOC, SCOPES } from './constants.js';
 import {
@@ -8,25 +8,28 @@ import {
   nextColor,
   persistAccounts,
 } from './state.js';
-import { startOfMonth, toYmd } from './dates.js';
+import { toYmd } from './dates.js';
 
 const CAL_BASE = 'https://www.googleapis.com/calendar/v3';
 
-export function normalizeEvent(item, account) {
+export function normalizeEvent(item, account, calendarMeta = {}) {
   const allDay = !!item.start?.date && !item.start?.dateTime;
   const start = item.start?.dateTime || item.start?.date;
   let end = item.end?.dateTime || item.end?.date;
   if (allDay && end) {
+    // all-day end is exclusive
     const d = new Date(`${end}T00:00:00`);
     d.setDate(d.getDate() - 1);
     end = toYmd(d);
   }
   return {
-    uid: `${account.id}:${item.id}`,
+    uid: `${account.id}:${calendarMeta.id || 'primary'}:${item.id}`,
     id: item.id,
     accountId: account.id,
     accountEmail: account.email,
     accountName: account.name,
+    calendarId: calendarMeta.id || 'primary',
+    calendarName: calendarMeta.summary || 'primary',
     color: account.color,
     summary: item.summary || '(無題)',
     description: item.description || '',
@@ -37,11 +40,8 @@ export function normalizeEvent(item, account) {
   };
 }
 
-/**
- * Optional: keep gapi client init for compatibility.
- * Calendar CRUD uses REST below so discovery load failures don't break the app.
- */
 export async function initGapiClient(state) {
+  // Calendar uses REST; gapi is only needed if present for legacy hooks.
   if (typeof gapi === 'undefined' || !gapi.client) {
     state.gapiReady = true;
     return;
@@ -52,8 +52,7 @@ export async function initGapiClient(state) {
       discoveryDocs: [DISCOVERY_DOC],
     });
   } catch (err) {
-    // Non-fatal: we use REST for Calendar
-    console.warn('[calendar] gapi.client.init failed (using REST fallback)', err);
+    console.warn('[calendar] gapi.client.init failed (REST only)', err);
   }
   state.gapiReady = true;
 }
@@ -91,10 +90,6 @@ export function requestAccessToken(state, { prompt, hint } = {}) {
   });
 }
 
-/**
- * Add or refresh an account. Always opens account picker for multi-account.
- * @param {'add'|'reauth'} mode
- */
 export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {}) {
   if (!hasValidConfig(state) || !state.tokenClient) {
     throw new Error('OAuth not configured');
@@ -111,6 +106,11 @@ export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {
   const info = await fetchUserInfo(accessToken);
   const id = info.sub;
   if (!id) throw new Error('no user id');
+
+  // Log granted scopes for debugging empty calendar results
+  if (resp.scope) {
+    console.info('[calendar] granted scopes:', resp.scope);
+  }
 
   let account = accountById(state, id);
   if (account) {
@@ -132,7 +132,7 @@ export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {
     state.accounts.push(account);
   }
 
-  state.tokens[id] = { accessToken, expiresAt };
+  state.tokens[id] = { accessToken, expiresAt, scope: resp.scope || '' };
 
   if (!state.createAccountId || !accountById(state, state.createAccountId)) {
     state.createAccountId = id;
@@ -172,10 +172,6 @@ function getValidToken(state, accountId) {
   return tok.accessToken;
 }
 
-/**
- * Calendar API via REST + Bearer token.
- * Safer for multi-account than gapi.client (single global token + discovery race).
- */
 async function calendarRequest(accessToken, path, { method = 'GET', body } = {}) {
   const res = await fetch(`${CAL_BASE}${path}`, {
     method,
@@ -208,39 +204,138 @@ async function calendarRequest(accessToken, path, { method = 'GET', body } = {})
   return data;
 }
 
-export async function fetchEventsForAccount(state, account) {
-  const accessToken = getValidToken(state, account.id);
-  const timeMin = startOfMonth(state.viewYear, state.viewMonth).toISOString();
-  const timeMax = new Date(state.viewYear, state.viewMonth + 1, 7, 23, 59, 59).toISOString();
-
-  const params = new URLSearchParams({
-    timeMin,
-    timeMax,
-    showDeleted: 'false',
-    singleEvents: 'true',
-    maxResults: '2500',
-    orderBy: 'startTime',
-  });
-
-  const data = await calendarRequest(
-    accessToken,
-    `/calendars/primary/events?${params.toString()}`
-  );
-  return (data?.items || []).map((item) => normalizeEvent(item, account));
+/** Inclusive local month window → RFC3339 (UTC via toISOString) */
+export function monthWindow(viewYear, viewMonth) {
+  // from first day 00:00 local to last day 23:59:59.999 local
+  const start = new Date(viewYear, viewMonth, 1, 0, 0, 0, 0);
+  const end = new Date(viewYear, viewMonth + 1, 0, 23, 59, 59, 999);
+  // pad ±1 day so timezone edge events are not dropped
+  start.setDate(start.getDate() - 1);
+  end.setDate(end.getDate() + 1);
+  return {
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
+  };
 }
 
-export async function insertEvent(state, accountId, resource) {
+async function listCalendars(accessToken) {
+  // calendar.events scope can list calendars the user has event access to
+  // Prefer calendarList; fall back to primary only
+  try {
+    const data = await calendarRequest(
+      accessToken,
+      '/users/me/calendarList?maxResults=250&showHidden=true'
+    );
+    const items = data?.items || [];
+    if (items.length) {
+      return items
+        .filter((c) => c.accessRole && c.accessRole !== 'none')
+        .map((c) => ({
+          id: c.id,
+          summary: c.summary || c.id,
+          primary: !!c.primary,
+          backgroundColor: c.backgroundColor,
+        }));
+    }
+  } catch (err) {
+    console.warn('[calendar] calendarList failed, using primary only', err);
+  }
+  return [{ id: 'primary', summary: 'primary', primary: true }];
+}
+
+async function listEventsForCalendar(accessToken, calendarId, timeMin, timeMax) {
+  const all = [];
+  let pageToken = '';
+  const encId = encodeURIComponent(calendarId);
+
+  do {
+    const params = new URLSearchParams({
+      timeMin,
+      timeMax,
+      showDeleted: 'false',
+      singleEvents: 'true',
+      maxResults: '2500',
+      orderBy: 'startTime',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+
+    const data = await calendarRequest(
+      accessToken,
+      `/calendars/${encId}/events?${params.toString()}`
+    );
+    all.push(...(data?.items || []));
+    pageToken = data?.nextPageToken || '';
+  } while (pageToken);
+
+  return all;
+}
+
+/**
+ * Fetch events for one account across ALL calendars in the month window.
+ * Returns { events, meta } for UI diagnostics.
+ */
+export async function fetchEventsForAccount(state, account) {
+  const accessToken = getValidToken(state, account.id);
+  const { timeMin, timeMax } = monthWindow(state.viewYear, state.viewMonth);
+
+  const calendars = await listCalendars(accessToken);
+  console.info(
+    `[calendar] ${account.email}: ${calendars.length} calendars, window ${timeMin} → ${timeMax}`
+  );
+
+  const events = [];
+  const perCal = [];
+
+  // Parallel per calendar (cap concurrency lightly by batching)
+  const results = await Promise.allSettled(
+    calendars.map(async (cal) => {
+      const items = await listEventsForCalendar(accessToken, cal.id, timeMin, timeMax);
+      return { cal, items };
+    })
+  );
+
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      const { cal, items } = r.value;
+      perCal.push({ id: cal.id, summary: cal.summary, count: items.length });
+      for (const item of items) {
+        events.push(normalizeEvent(item, account, cal));
+      }
+    } else {
+      console.warn(`[calendar] ${account.email} calendar fetch failed`, r.reason);
+      perCal.push({ id: '?', summary: 'error', count: -1, error: String(r.reason?.message || r.reason) });
+    }
+  }
+
+  console.info(`[calendar] ${account.email}: total events ${events.length}`, perCal);
+
+  return {
+    events,
+    meta: {
+      email: account.email,
+      calendars: calendars.length,
+      total: events.length,
+      perCal,
+      timeMin,
+      timeMax,
+    },
+  };
+}
+
+export async function insertEvent(state, accountId, resource, calendarId = 'primary') {
   const accessToken = getValidToken(state, accountId);
-  return calendarRequest(accessToken, '/calendars/primary/events', {
+  const encId = encodeURIComponent(calendarId || 'primary');
+  return calendarRequest(accessToken, `/calendars/${encId}/events`, {
     method: 'POST',
     body: resource,
   });
 }
 
-export async function deleteEvent(state, accountId, eventId) {
+export async function deleteEvent(state, accountId, eventId, calendarId = 'primary') {
   const accessToken = getValidToken(state, accountId);
-  const id = encodeURIComponent(eventId);
-  return calendarRequest(accessToken, `/calendars/primary/events/${id}`, {
+  const encCal = encodeURIComponent(calendarId || 'primary');
+  const encEv = encodeURIComponent(eventId);
+  return calendarRequest(accessToken, `/calendars/${encCal}/events/${encEv}`, {
     method: 'DELETE',
   });
 }
