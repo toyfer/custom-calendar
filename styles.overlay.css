@@ -1,0 +1,56 @@
+/* Overlay-first chip states + form select (extends base theme) */
+
+.chip.visible {
+  border-color: color-mix(in srgb, var(--chip-color, var(--accent)) 55%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-color, var(--accent)) 25%, transparent);
+}
+
+.chip.hidden-layer {
+  opacity: 0.45;
+  filter: grayscale(0.35);
+}
+
+.chip.create-target {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--chip-color, var(--accent)) 40%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--chip-color, var(--accent)) 20%, transparent);
+}
+
+.chip-eye {
+  font-size: 0.65rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.chip-menu-btn {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  padding: 0 0.1rem;
+  flex-shrink: 0;
+}
+
+.chip-menu-btn:hover {
+  color: var(--text);
+}
+
+.panel-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.account-select-full {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.legend-item em {
+  font-style: normal;
+  color: var(--accent);
+  font-size: 0.7rem;
+}

@@ -1,81 +1,66 @@
 # custom-calendar
 
-Google Calendar のデータを使った、**完全自作 UI** の静的カレンダーアプリです。  
-サーバー DB 不要・GitHub Pages だけで動きます。**複数 Google アカウント**に対応しています。
+Google Calendar のデータを **複数アカウント重ね表示（オーバーレイ）** する自作 UI。  
+サーバー不要 · GitHub Pages · どちらのアカウントにも予定を作成可能。
 
 ## デモ
 
 `https://toyfer.github.io/custom-calendar/`
 
-## 機能
+## コンセプト
 
-- **複数アカウント**の追加・切替・削除（アカウントピッカー）
-- アカウントごとの色分け・凡例
-- 「全アカウント表示」トグル（マージ / 単一）
-- 月表示 + 選択日の予定リスト
-- 予定の作成（作成先アカウント選択）・削除
-- 終日予定
-- IndexedDB キャッシュ / sessionStorage トークン
-- キーボード: `←` `→` 月移動 / `T` 今日
-- ダーク調 UI
+| やりたいこと | 操作 |
+|--------------|------|
+| 予定を重ねて見る | デフォルト。全アカウントの予定を同月グリッドに色分け表示 |
+| 一時的に1つ隠す | チップをクリック → その層の表示 ON/OFF |
+| 予定を作るアカウントを選ぶ | 右フォームの「作成先アカウント」セレクト（どちらでも可） |
+| 作成先を素早く切替 | チップの ▾ →「作成先にする」 |
+| アカウント追加 | **+ アカウント**（毎回 Google のアカウント選択） |
+| 再連携 | ▾ → 再連携 |
 
-## セットアップ（OAuth）
+「どちらか一方だけ表示」への切替は不要。**常にオーバーレイ**が基本です。
 
-### 1. Google Cloud
-
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
-2. [Calendar API](https://console.cloud.google.com/flows/enableapi?apiid=calendar-json.googleapis.com) を有効化
-3. OAuth 同意画面を設定（User type: External / Testing で可）
-4. スコープ:
-   - `https://www.googleapis.com/auth/calendar.events`
-   - `https://www.googleapis.com/auth/userinfo.email`
-   - `https://www.googleapis.com/auth/userinfo.profile`
-5. **OAuth クライアント ID（Web）** を作成
-6. **Authorized JavaScript origins**:
+## アーキテクチャ（保守用）
 
 ```
-http://localhost:5500
-http://127.0.0.1:5500
-https://toyfer.github.io
+index.html          UI シェル
+styles.css          ベーステーマ
+styles.overlay.css  重ね表示チップ用（index から styles.css に統合推奨）
+config.json         OAuth 公開設定
+js/
+  main.js           エントリ・配線・ユースケース
+  state.js          状態 + 永続化（accounts / tokens / createAccountId）
+  google.js         GIS + Calendar API
+  ui.js             描画
+  cache.js          IndexedDB
+  dates.js          日付ユーティリティ
+  storage.js        local/session helpers
+  constants.js      スコープ・キー・パレット
 ```
 
-7. **API キー**（リファラ制限推奨: `https://toyfer.github.io/*`）
+手戻りを減らす方針:
 
-### 2. 認証情報
+- **表示（visible）** と **作成先（createAccountId）** を分離
+- トークンは sessionStorage、メタは localStorage
+- Google 呼び出しは `google.js` に集約
+- 描画は `ui.js`、状態遷移は `main.js`
 
-`config.json` または画面右上「⚙ 設定」:
+## OAuth セットアップ
 
-```json
-{
-  "CLIENT_ID": "xxxx.apps.googleusercontent.com",
-  "API_KEY": "AIza..."
-}
-```
+1. Calendar API 有効化
+2. スコープ:
+   - `calendar.events`
+   - `userinfo.email`
+   - `userinfo.profile`
+3. JS origins: `https://toyfer.github.io` / localhost
+4. **Testing なら使う Google アカウントをすべて Test users に追加**
+5. `config.json` に Client ID / API Key
 
-Client Secret は不要です。
+## キーボード
 
-### 3. 複数アカウント（重要）
-
-同意画面が **Testing** のとき:
-
-- 使う **すべての** Google アカウントを **Test users** に追加する
-- 1つ目: 「Google で連携」
-- 2つ目以降: 「+ アカウント」（毎回アカウント選択 UI が出る）
-- チップをクリック → 表示切替 / 再連携 / 外す
-
-トークンは **sessionStorage**（タブを閉じると再連携が必要な場合あり）。  
-アカウントの名前・色などのメタは **localStorage** に残ります。
-
-### 4. GitHub Pages
-
-Settings → Pages → Branch `main` / root
-
-## ローカル
-
-```bash
-npx serve .
-# or: python3 -m http.server 5500
-```
+- `←` `→` 月移動
+- `T` 今日
+- `Esc` メニュー/モーダル閉じる
 
 ## ライセンス
 
