@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Custom Calendar</title>
-    <meta name="description" content="Multi-account custom Google Calendar UI" />
+    <meta name="description" content="Multi-account overlay Google Calendar UI" />
     <meta name="theme-color" content="#0f1117" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -15,13 +15,13 @@
           <div class="logo" aria-hidden="true">C</div>
           <div>
             <h1>Custom Calendar</h1>
-            <span>複数 Google アカウント対応 · 自作 UI</span>
+            <span>複数アカウントを重ねて表示 · どちらにも作成可能</span>
           </div>
         </div>
 
         <div class="actions">
           <div id="accountBar" class="account-bar" hidden>
-            <div id="accountChips" class="account-chips" role="list"></div>
+            <div id="accountChips" class="account-chips" role="list" aria-label="アカウント（クリックで表示ON/OFF）"></div>
             <button id="addAccountBtn" class="ghost sm" type="button" title="アカウントを追加">
               + アカウント
             </button>
@@ -45,10 +45,7 @@
               <button id="nextMonthBtn" class="icon-btn" type="button" aria-label="翌月">›</button>
               <button id="todayBtn" class="ghost sm" type="button">今日</button>
             </div>
-            <label class="toggle">
-              <input id="mergeToggle" type="checkbox" checked />
-              <span>全アカウント表示</span>
-            </label>
+            <p class="panel-hint">チップ = 表示ON/OFF · メニューで作成先 / 再連携</p>
           </div>
           <div id="calendarGrid" class="calendar-grid" aria-label="カレンダー"></div>
           <div id="legend" class="legend" hidden></div>
@@ -63,18 +60,19 @@
             <div id="eventList" class="event-list">
               <div class="empty-state">
                 <div class="empty-icon">📅</div>
-                <p>Google アカウントを連携すると予定が表示されます</p>
-                <button id="emptyAuthBtn" class="primary sm" type="button" disabled>
-                  連携する
-                </button>
+                <p>Google アカウントを連携すると、複数アカウントの予定を重ねて表示できます</p>
+                <button id="emptyAuthBtn" class="primary sm" type="button" disabled>連携する</button>
               </div>
             </div>
 
             <form id="createForm" class="form card-form">
               <div class="form-head">
                 <h3>予定を追加</h3>
-                <select id="createAccount" class="account-select" title="作成先アカウント"></select>
               </div>
+              <label>
+                作成先アカウント
+                <select id="createAccount" class="account-select-full" title="作成先アカウント"></select>
+              </label>
               <label>
                 タイトル
                 <input id="eventTitle" type="text" required placeholder="例: 打ち合わせ" autocomplete="off" />
@@ -106,14 +104,12 @@
       </main>
 
       <footer class="footer">
-        <span>データは Google Calendar に保存 · トークンはブラウザ内のみ</span>
+        <span>重ね表示が既定 · データは Google Calendar · トークンはブラウザ内のみ</span>
       </footer>
     </div>
 
-    <!-- Account menu -->
     <div id="accountMenu" class="account-menu" hidden role="menu"></div>
 
-    <!-- Settings -->
     <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal">
         <div class="modal-head">
@@ -133,8 +129,8 @@
             <input id="cfgApiKey" type="text" placeholder="AIza..." autocomplete="off" />
           </label>
           <p class="hint">
-            Test users に使う Google アカウントをすべて追加してください。
-            origins: <code>https://toyfer.github.io</code>
+            複数アカウントを使う場合、OAuth 同意画面が Testing なら
+            <strong>すべての</strong> Google アカウントを Test users に追加してください。
           </p>
           <div class="form-actions">
             <button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button>
@@ -145,7 +141,6 @@
       </div>
     </div>
 
-    <!-- Confirm delete -->
     <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
       <div class="modal modal-sm">
         <h3>予定を削除</h3>
@@ -163,7 +158,7 @@
       <span id="loadingText">読み込み中…</span>
     </div>
 
-    <script src="./app.js"></script>
+    <script type="module" src="./js/main.js"></script>
     <script async defer src="https://apis.google.com/js/api.js" onload="window.__gapiLoaded && window.__gapiLoaded()"></script>
     <script async defer src="https://accounts.google.com/gsi/client" onload="window.__gisLoaded && window.__gisLoaded()"></script>
   </body>
