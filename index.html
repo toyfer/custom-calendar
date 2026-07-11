@@ -4,65 +4,94 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Custom Calendar</title>
-    <meta
-      name="description"
-      content="Self-hosted custom UI for Google Calendar (static GitHub Pages app)"
-    />
+    <meta name="description" content="Multi-account custom Google Calendar UI" />
+    <meta name="theme-color" content="#0f1117" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div class="app">
       <header class="topbar">
         <div class="brand">
-          <h1>Custom Calendar</h1>
-          <span>Google Calendar データを自作 UI で表示・操作</span>
+          <div class="logo" aria-hidden="true">C</div>
+          <div>
+            <h1>Custom Calendar</h1>
+            <span>複数 Google アカウント対応 · 自作 UI</span>
+          </div>
         </div>
+
         <div class="actions">
+          <div id="accountBar" class="account-bar" hidden>
+            <div id="accountChips" class="account-chips" role="list"></div>
+            <button id="addAccountBtn" class="ghost sm" type="button" title="アカウントを追加">
+              + アカウント
+            </button>
+          </div>
+
           <span id="statusPill" class="status-pill">未接続</span>
-          <button id="settingsBtn" class="ghost" type="button">設定</button>
+          <button id="settingsBtn" class="ghost sm" type="button" title="設定">⚙</button>
           <button id="authBtn" class="primary" type="button" disabled>Google で連携</button>
-          <button id="signoutBtn" class="ghost" type="button" hidden>切断</button>
-          <button id="refreshBtn" class="ghost" type="button" disabled>再取得</button>
+          <button id="refreshBtn" class="ghost sm" type="button" disabled title="再取得">↻</button>
         </div>
       </header>
 
+      <div id="banner" class="banner" hidden></div>
+
       <main class="layout">
-        <section class="panel">
+        <section class="panel calendar-panel">
           <div class="panel-header">
-            <h2>月表示</h2>
             <div class="month-nav">
-              <button id="prevMonthBtn" type="button" aria-label="前月">‹</button>
-              <div id="monthLabel" class="month-label">—</div>
-              <button id="nextMonthBtn" type="button" aria-label="翌月">›</button>
-              <button id="todayBtn" class="ghost" type="button">今日</button>
+              <button id="prevMonthBtn" class="icon-btn" type="button" aria-label="前月">‹</button>
+              <h2 id="monthLabel" class="month-label">—</h2>
+              <button id="nextMonthBtn" class="icon-btn" type="button" aria-label="翌月">›</button>
+              <button id="todayBtn" class="ghost sm" type="button">今日</button>
             </div>
+            <label class="toggle">
+              <input id="mergeToggle" type="checkbox" checked />
+              <span>全アカウント表示</span>
+            </label>
           </div>
           <div id="calendarGrid" class="calendar-grid" aria-label="カレンダー"></div>
+          <div id="legend" class="legend" hidden></div>
         </section>
 
-        <section class="panel">
+        <section class="panel side-panel">
           <div class="panel-header">
-            <h2>選択日の予定</h2>
+            <h2>予定</h2>
+            <span id="selectedDateLabel" class="selected-date">—</span>
           </div>
           <div class="side-body">
-            <div id="selectedDateLabel" class="selected-date">日付を選択</div>
             <div id="eventList" class="event-list">
-              <div class="empty">Google と連携すると予定が表示されます。</div>
+              <div class="empty-state">
+                <div class="empty-icon">📅</div>
+                <p>Google アカウントを連携すると予定が表示されます</p>
+                <button id="emptyAuthBtn" class="primary sm" type="button" disabled>
+                  連携する
+                </button>
+              </div>
             </div>
 
-            <form id="createForm" class="form">
-              <h3>予定を追加</h3>
+            <form id="createForm" class="form card-form">
+              <div class="form-head">
+                <h3>予定を追加</h3>
+                <select id="createAccount" class="account-select" title="作成先アカウント"></select>
+              </div>
               <label>
                 タイトル
-                <input id="eventTitle" type="text" required placeholder="例: 打ち合わせ" />
+                <input id="eventTitle" type="text" required placeholder="例: 打ち合わせ" autocomplete="off" />
               </label>
-              <label>
-                開始
-                <input id="eventStart" type="datetime-local" required />
-              </label>
-              <label>
-                終了
-                <input id="eventEnd" type="datetime-local" required />
+              <div class="form-row">
+                <label>
+                  開始
+                  <input id="eventStart" type="datetime-local" required />
+                </label>
+                <label>
+                  終了
+                  <input id="eventEnd" type="datetime-local" required />
+                </label>
+              </div>
+              <label class="check-row">
+                <input id="eventAllDay" type="checkbox" />
+                <span>終日</span>
               </label>
               <label>
                 メモ
@@ -71,39 +100,41 @@
               <div class="form-actions">
                 <button id="createBtn" class="primary" type="submit" disabled>作成</button>
               </div>
-              <p class="hint">
-                スコープ <code>calendar.events</code> が必要です。OAuth 設定後に有効になります。
-              </p>
             </form>
           </div>
         </section>
       </main>
+
+      <footer class="footer">
+        <span>データは Google Calendar に保存 · トークンはブラウザ内のみ</span>
+      </footer>
     </div>
 
-    <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <!-- Account menu -->
+    <div id="accountMenu" class="account-menu" hidden role="menu"></div>
+
+    <!-- Settings -->
+    <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal">
-        <h3>OAuth 設定</h3>
-        <p>
-          Google Cloud で発行した <strong>Client ID</strong> と <strong>API Key</strong> を入力します。
-          値はブラウザの localStorage に保存され、空の <code>config.json</code> より優先されます。
+        <div class="modal-head">
+          <h3 id="settingsTitle">設定</h3>
+          <button type="button" class="icon-btn" data-close-settings aria-label="閉じる">×</button>
+        </div>
+        <p class="modal-lead">
+          OAuth 認証情報。localStorage に保存すると <code>config.json</code> より優先されます。
         </p>
         <form id="settingsForm" class="form">
           <label>
             Client ID
-            <input
-              id="cfgClientId"
-              type="text"
-              placeholder="xxxx.apps.googleusercontent.com"
-              autocomplete="off"
-            />
+            <input id="cfgClientId" type="text" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" />
           </label>
           <label>
             API Key
             <input id="cfgApiKey" type="text" placeholder="AIza..." autocomplete="off" />
           </label>
           <p class="hint">
-            Authorized JavaScript origins に
-            <code>https://toyfer.github.io</code> と localhost を追加してください。Client Secret は不要です。
+            Test users に使う Google アカウントをすべて追加してください。
+            origins: <code>https://toyfer.github.io</code>
           </p>
           <div class="form-actions">
             <button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button>
@@ -114,7 +145,23 @@
       </div>
     </div>
 
+    <!-- Confirm delete -->
+    <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
+      <div class="modal modal-sm">
+        <h3>予定を削除</h3>
+        <p id="confirmText" class="modal-lead">この予定を削除しますか？</p>
+        <div class="form-actions">
+          <button id="confirmCancel" class="ghost" type="button">キャンセル</button>
+          <button id="confirmOk" class="danger" type="button">削除する</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="loadingOverlay" class="loading-overlay" hidden>
+      <div class="spinner"></div>
+      <span id="loadingText">読み込み中…</span>
+    </div>
 
     <script src="./app.js"></script>
     <script async defer src="https://apis.google.com/js/api.js" onload="window.__gapiLoaded && window.__gapiLoaded()"></script>
