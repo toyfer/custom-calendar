@@ -20,7 +20,7 @@ export function createState() {
     gisReady: false,
 
     accounts: [],
-    tokens: {}, // id -> { accessToken, expiresAt }
+    tokens: {}, // id -> { accessToken, expiresAt, scope }
     createAccountId: null, // which account receives new events
 
     viewYear: 0,
@@ -29,6 +29,9 @@ export function createState() {
     events: [],
 
     pendingDelete: null,
+
+    /** Last fetch diagnostic (not cleared by status pill updates) */
+    lastFetchNote: '',
   };
 }
 
@@ -83,6 +86,9 @@ export function persistAccounts(state) {
   session.set(STORAGE.tokens, state.tokens);
   local.set(STORAGE.ui, {
     createAccountId: state.createAccountId,
+    viewYear: state.viewYear,
+    viewMonth: state.viewMonth,
+    selectedDate: state.selectedDate,
   });
 }
 
@@ -108,6 +114,13 @@ export function restoreAccounts(state) {
   const legacyUi = local.get('custom-calendar.ui.v2', {});
   state.createAccountId =
     ui.createAccountId || legacyUi.activeAccountId || state.accounts[0]?.id || null;
+
+  // Restore view if saved (same session UX)
+  if (typeof ui.viewYear === 'number' && typeof ui.viewMonth === 'number') {
+    state.viewYear = ui.viewYear;
+    state.viewMonth = ui.viewMonth;
+  }
+  if (ui.selectedDate) state.selectedDate = ui.selectedDate;
 
   markStaleFlags(state);
 }
