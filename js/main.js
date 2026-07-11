@@ -40,7 +40,10 @@ import {
   renderAccounts,
   renderCalendar,
   renderEventList,
+  setDisabled,
+  setHidden,
   setLoading,
+  setProp,
   setStatus,
   showBanner,
   toast,
@@ -56,7 +59,6 @@ function paint() {
       const a = accountById(state, id);
       if (!a) return;
       a.visible = a.visible === false;
-      // ensure at least one visible if possible
       if (!state.accounts.some((x) => x.visible !== false)) {
         a.visible = true;
         toast('少なくとも1つは表示が必要です');
@@ -98,37 +100,35 @@ function paint() {
 }
 
 function fillDefaultTimes(ymd) {
-  if ($('eventAllDay').checked) {
-    $('eventStart').value = ymd;
-    $('eventEnd').value = ymd;
+  const allDay = $('eventAllDay');
+  if (allDay?.checked) {
+    setProp('eventStart', 'value', ymd);
+    setProp('eventEnd', 'value', ymd);
     return;
   }
   const { start, end } = defaultRangeForDay(ymd);
-  $('eventStart').value = toLocalInputValue(start);
-  $('eventEnd').value = toLocalInputValue(end);
+  setProp('eventStart', 'value', toLocalInputValue(start));
+  setProp('eventEnd', 'value', toLocalInputValue(end));
 }
 
 // ── Google bootstrapping ──────────────────────────────────
 function maybeEnableAuth() {
   if (!state.gapiReady || !state.gisReady) return;
   if (!hasValidConfig(state)) {
-    $('authBtn').disabled = true;
-    $('emptyAuthBtn').disabled = true;
+    setDisabled('authBtn', true);
+    setDisabled('emptyAuthBtn', true);
+    setDisabled('addAccountBtn', true);
     setStatus('設定が必要', 'warn');
     return;
   }
 
   initTokenClient(state);
-  $('authBtn').disabled = false;
-  $('emptyAuthBtn').disabled = false;
-  $('addAccountBtn').disabled = false;
+  setDisabled('authBtn', false);
+  setDisabled('emptyAuthBtn', false); // may no-op if not in DOM
+  setDisabled('addAccountBtn', false);
 
-  if (liveAccounts(state).length) {
-    paint();
-    fetchAll();
-  } else {
-    paint();
-  }
+  paint();
+  if (liveAccounts(state).length) fetchAll();
 }
 
 window.__gapiLoaded = () => {
@@ -231,7 +231,6 @@ async function fetchAll() {
       }
     });
 
-    // Keep events for accounts we did not refresh this round
     const liveIds = new Set(targets.map((a) => a.id));
     const kept = state.events.filter((e) => !liveIds.has(e.accountId));
     state.events = [...kept, ...merged];
@@ -251,18 +250,18 @@ async function fetchAll() {
 // ── create / delete ───────────────────────────────────────
 async function onCreate(e) {
   e.preventDefault();
-  const accountId = $('createAccount').value || state.createAccountId;
+  const accountId = $('createAccount')?.value || state.createAccountId;
   const acc = accountById(state, accountId);
   if (!acc || acc.stale) {
     toast('有効な作成先アカウントを選んでください', 'error');
     return;
   }
 
-  const summary = $('eventTitle').value.trim();
-  const allDay = $('eventAllDay').checked;
-  const startLocal = $('eventStart').value;
-  const endLocal = $('eventEnd').value;
-  const description = $('eventDesc').value.trim();
+  const summary = ($('eventTitle')?.value || '').trim();
+  const allDay = !!$('eventAllDay')?.checked;
+  const startLocal = $('eventStart')?.value || '';
+  const endLocal = $('eventEnd')?.value || '';
+  const description = ($('eventDesc')?.value || '').trim();
   if (!summary) {
     toast('タイトルを入力してください', 'error');
     return;
@@ -302,17 +301,17 @@ async function onCreate(e) {
     };
   }
 
-  $('createBtn').disabled = true;
+  setDisabled('createBtn', true);
   setLoading(true, `${acc.email} に作成中…`);
   try {
     await insertEvent(state, accountId, resource);
     state.createAccountId = accountId;
     persistAccounts(state);
-    $('eventTitle').value = '';
-    $('eventDesc').value = '';
-    $('eventAllDay').checked = false;
-    $('eventStart').type = 'datetime-local';
-    $('eventEnd').type = 'datetime-local';
+    setProp('eventTitle', 'value', '');
+    setProp('eventDesc', 'value', '');
+    setProp('eventAllDay', 'checked', false);
+    setProp('eventStart', 'type', 'datetime-local');
+    setProp('eventEnd', 'type', 'datetime-local');
     fillDefaultTimes(state.selectedDate);
     toast(`作成しました → ${acc.email}`, 'ok');
     await fetchAll();
@@ -321,20 +320,20 @@ async function onCreate(e) {
     toast('作成失敗: ' + (err?.result?.error?.message || err?.message || err), 'error');
   } finally {
     setLoading(false);
-    $('createBtn').disabled = liveAccounts(state).length === 0;
+    setDisabled('createBtn', liveAccounts(state).length === 0);
   }
 }
 
 function askDelete(ev) {
   state.pendingDelete = ev;
-  $('confirmText').textContent = `「${ev.summary}」を削除しますか？（${ev.accountEmail}）`;
-  $('confirmModal').classList.add('open');
+  setProp('confirmText', 'textContent', `「${ev.summary}」を削除しますか？（${ev.accountEmail}）`);
+  $('confirmModal')?.classList.add('open');
 }
 
 async function confirmDelete() {
   const ev = state.pendingDelete;
   state.pendingDelete = null;
-  $('confirmModal').classList.remove('open');
+  $('confirmModal')?.classList.remove('open');
   if (!ev) return;
 
   setLoading(true, '削除中…');
@@ -352,27 +351,32 @@ async function confirmDelete() {
 
 // ── settings / wire ───────────────────────────────────────
 function openSettings() {
-  $('cfgClientId').value = state.clientId || '';
-  $('cfgApiKey').value = state.apiKey || '';
-  $('settingsModal').classList.add('open');
+  setProp('cfgClientId', 'value', state.clientId || '');
+  setProp('cfgApiKey', 'value', state.apiKey || '');
+  $('settingsModal')?.classList.add('open');
 }
 
 function closeSettings() {
-  $('settingsModal').classList.remove('open');
+  $('settingsModal')?.classList.remove('open');
+}
+
+function on(id, event, fn) {
+  const el = $(id);
+  if (el) el.addEventListener(event, fn);
 }
 
 function wire() {
-  $('settingsBtn').addEventListener('click', openSettings);
-  $('settingsModal').addEventListener('click', (ev) => {
-    if (ev.target === $('settingsModal') || ev.target.hasAttribute('data-close-settings')) {
+  on('settingsBtn', 'click', openSettings);
+  $('settingsModal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('settingsModal') || ev.target.hasAttribute?.('data-close-settings')) {
       closeSettings();
     }
   });
 
-  $('settingsForm').addEventListener('submit', (ev) => {
+  on('settingsForm', 'submit', (ev) => {
     ev.preventDefault();
-    const CLIENT_ID = $('cfgClientId').value.trim();
-    const API_KEY = $('cfgApiKey').value.trim();
+    const CLIENT_ID = ($('cfgClientId')?.value || '').trim();
+    const API_KEY = ($('cfgApiKey')?.value || '').trim();
     if (isPlaceholder(CLIENT_ID) || isPlaceholder(API_KEY) || !CLIENT_ID || !API_KEY) {
       toast('有効な Client ID と API Key を入力してください', 'error');
       return;
@@ -382,24 +386,28 @@ function wire() {
     setTimeout(() => location.reload(), 500);
   });
 
-  $('clearCfgBtn').addEventListener('click', () => {
+  on('clearCfgBtn', 'click', () => {
     clearConfigLocal();
     toast('ローカル設定を削除しました');
     setTimeout(() => location.reload(), 400);
   });
 
-  $('authBtn').addEventListener('click', addAccount);
-  $('emptyAuthBtn').addEventListener('click', addAccount);
-  $('addAccountBtn').addEventListener('click', addAccount);
-  $('refreshBtn').addEventListener('click', fetchAll);
+  // emptyAuthBtn is recreated in event list; use event delegation
+  on('authBtn', 'click', addAccount);
+  on('addAccountBtn', 'click', addAccount);
+  on('refreshBtn', 'click', fetchAll);
+  $('eventList')?.addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (t && (t.id === 'emptyAuthBtn' || t.closest?.('#emptyAuthBtn'))) addAccount();
+  });
 
-  $('createAccount').addEventListener('change', (e) => {
+  on('createAccount', 'change', (e) => {
     state.createAccountId = e.target.value;
     persistAccounts(state);
     paint();
   });
 
-  $('prevMonthBtn').addEventListener('click', async () => {
+  on('prevMonthBtn', 'click', async () => {
     state.viewMonth -= 1;
     if (state.viewMonth < 0) {
       state.viewMonth = 11;
@@ -409,7 +417,7 @@ function wire() {
     if (liveAccounts(state).length) await fetchAll();
   });
 
-  $('nextMonthBtn').addEventListener('click', async () => {
+  on('nextMonthBtn', 'click', async () => {
     state.viewMonth += 1;
     if (state.viewMonth > 11) {
       state.viewMonth = 0;
@@ -419,7 +427,7 @@ function wire() {
     if (liveAccounts(state).length) await fetchAll();
   });
 
-  $('todayBtn').addEventListener('click', async () => {
+  on('todayBtn', 'click', async () => {
     const now = new Date();
     state.viewYear = now.getFullYear();
     state.viewMonth = now.getMonth();
@@ -429,24 +437,24 @@ function wire() {
     if (liveAccounts(state).length) await fetchAll();
   });
 
-  $('createForm').addEventListener('submit', onCreate);
+  on('createForm', 'submit', onCreate);
 
-  $('eventAllDay').addEventListener('change', (e) => {
-    const on = e.target.checked;
-    $('eventStart').type = on ? 'date' : 'datetime-local';
-    $('eventEnd').type = on ? 'date' : 'datetime-local';
+  on('eventAllDay', 'change', (e) => {
+    const onAllDay = e.target.checked;
+    setProp('eventStart', 'type', onAllDay ? 'date' : 'datetime-local');
+    setProp('eventEnd', 'type', onAllDay ? 'date' : 'datetime-local');
     fillDefaultTimes(state.selectedDate);
   });
 
-  $('confirmCancel').addEventListener('click', () => {
+  on('confirmCancel', 'click', () => {
     state.pendingDelete = null;
-    $('confirmModal').classList.remove('open');
+    $('confirmModal')?.classList.remove('open');
   });
-  $('confirmOk').addEventListener('click', confirmDelete);
-  $('confirmModal').addEventListener('click', (ev) => {
+  on('confirmOk', 'click', confirmDelete);
+  $('confirmModal')?.addEventListener('click', (ev) => {
     if (ev.target === $('confirmModal')) {
       state.pendingDelete = null;
-      $('confirmModal').classList.remove('open');
+      $('confirmModal')?.classList.remove('open');
     }
   });
 
@@ -456,11 +464,11 @@ function wire() {
     if (e.key === 'Escape') {
       closeAccountMenu();
       closeSettings();
-      $('confirmModal').classList.remove('open');
+      $('confirmModal')?.classList.remove('open');
     }
-    if (e.key === 'ArrowLeft') $('prevMonthBtn').click();
-    if (e.key === 'ArrowRight') $('nextMonthBtn').click();
-    if (e.key === 't' || e.key === 'T') $('todayBtn').click();
+    if (e.key === 'ArrowLeft') $('prevMonthBtn')?.click();
+    if (e.key === 'ArrowRight') $('nextMonthBtn')?.click();
+    if (e.key === 't' || e.key === 'T') $('todayBtn')?.click();
   });
 }
 
