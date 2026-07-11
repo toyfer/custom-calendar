@@ -17,8 +17,26 @@ import {
 
 export const $ = (id) => document.getElementById(id);
 
+/** Safe property set — never throw if node missing */
+export function setProp(id, prop, value) {
+  const el = $(id);
+  if (el) el[prop] = value;
+  return el;
+}
+
+export function setDisabled(id, disabled) {
+  return setProp(id, 'disabled', !!disabled);
+}
+
+export function setHidden(id, hidden) {
+  const el = $(id);
+  if (el) el.hidden = !!hidden;
+  return el;
+}
+
 export function toast(msg, type = '') {
   const el = $('toast');
+  if (!el) return;
   el.textContent = msg;
   el.classList.remove('error', 'ok', 'show');
   if (type) el.classList.add(type);
@@ -29,6 +47,7 @@ export function toast(msg, type = '') {
 
 export function setStatus(text, mode = '') {
   const pill = $('statusPill');
+  if (!pill) return;
   pill.textContent = text;
   pill.classList.remove('ok', 'warn');
   if (mode) pill.classList.add(mode);
@@ -36,12 +55,14 @@ export function setStatus(text, mode = '') {
 
 export function setLoading(on, text = '読み込み中…') {
   const el = $('loadingOverlay');
+  if (!el) return;
   el.hidden = !on;
-  $('loadingText').textContent = text;
+  setProp('loadingText', 'textContent', text);
 }
 
 export function showBanner(html) {
   const b = $('banner');
+  if (!b) return;
   if (!html) {
     b.hidden = true;
     b.innerHTML = '';
@@ -68,25 +89,31 @@ function eventsForDate(state, ymd) {
 export function renderAccounts(state, handlers) {
   const bar = $('accountBar');
   const chips = $('accountChips');
+  if (!bar || !chips) return;
   chips.innerHTML = '';
+
+  const canAuth = handlers.canAuth();
+  const hasLive = liveAccounts(state).length > 0;
 
   if (!state.accounts.length) {
     bar.hidden = true;
-    $('authBtn').hidden = false;
-    $('authBtn').textContent = 'Google で連携';
-    $('refreshBtn').disabled = true;
-    $('createBtn').disabled = true;
-    $('emptyAuthBtn').disabled = !handlers.canAuth();
+    setHidden('authBtn', false);
+    setProp('authBtn', 'textContent', 'Google で連携');
+    setDisabled('authBtn', !canAuth);
+    setDisabled('refreshBtn', true);
+    setDisabled('createBtn', true);
+    setDisabled('addAccountBtn', !canAuth);
+    // emptyAuthBtn lives inside #eventList and is recreated by renderEventList
     renderCreateSelect(state);
     renderLegend(state);
     return;
   }
 
   bar.hidden = false;
-  $('authBtn').hidden = true;
-  $('refreshBtn').disabled = liveAccounts(state).length === 0;
-  $('createBtn').disabled = liveAccounts(state).length === 0;
-  $('emptyAuthBtn').disabled = true;
+  setHidden('authBtn', true);
+  setDisabled('refreshBtn', !hasLive);
+  setDisabled('createBtn', !hasLive);
+  setDisabled('addAccountBtn', !canAuth);
 
   for (const a of state.accounts) {
     const chip = document.createElement('button');
@@ -126,7 +153,6 @@ export function renderAccounts(state, handlers) {
     name.textContent = a.name || a.email.split('@')[0];
     chip.appendChild(name);
 
-    // visibility eye
     const eye = document.createElement('span');
     eye.className = 'chip-eye';
     eye.textContent = a.visible !== false ? '●' : '○';
@@ -141,20 +167,16 @@ export function renderAccounts(state, handlers) {
       chip.appendChild(warn);
     }
 
-    // click = toggle visibility (overlay layer)
     chip.addEventListener('click', (ev) => {
-      // if menu open target, ignore
       if (ev.detail === 0) return;
       handlers.onToggleVisible(a.id);
     });
 
-    // context / long-press style: right click or secondary button
     chip.addEventListener('contextmenu', (ev) => {
       ev.preventDefault();
       handlers.onAccountMenu(a, chip);
     });
 
-    // also small caret for menu
     const menuBtn = document.createElement('span');
     menuBtn.className = 'chip-menu-btn';
     menuBtn.textContent = '▾';
@@ -194,6 +216,7 @@ function updateStatusBanner(state) {
 
 export function renderCreateSelect(state) {
   const sel = $('createAccount');
+  if (!sel) return;
   sel.innerHTML = '';
   const live = liveAccounts(state);
   if (!live.length) {
@@ -219,6 +242,7 @@ export function renderCreateSelect(state) {
 
 export function renderLegend(state) {
   const el = $('legend');
+  if (!el) return;
   const accs = visibleAccounts(state);
   if (accs.length === 0) {
     el.hidden = true;
@@ -238,6 +262,7 @@ export function renderLegend(state) {
 
 export function renderCalendar(state, onSelectDate) {
   const grid = $('calendarGrid');
+  if (!grid) return;
   grid.innerHTML = '';
 
   DOW.forEach((d, i) => {
@@ -249,7 +274,7 @@ export function renderCalendar(state, onSelectDate) {
 
   const y = state.viewYear;
   const m = state.viewMonth;
-  $('monthLabel').textContent = formatMonthLabel(y, m);
+  setProp('monthLabel', 'textContent', formatMonthLabel(y, m));
 
   const first = new Date(y, m, 1);
   const startPad = first.getDay();
@@ -307,6 +332,7 @@ export function renderCalendar(state, onSelectDate) {
 
 export function renderEventList(state, handlers) {
   const list = $('eventList');
+  if (!list) return;
   const ymd = state.selectedDate;
 
   if (!state.accounts.length) {
@@ -314,24 +340,24 @@ export function renderEventList(state, handlers) {
       <div class="empty-state">
         <div class="empty-icon">📅</div>
         <p>Google アカウントを連携すると、複数アカウントの予定を重ねて表示できます</p>
-        <button id="emptyAuthBtn2" class="primary sm" type="button">連携する</button>
+        <button id="emptyAuthBtn" class="primary sm" type="button">連携する</button>
       </div>`;
-    const b = document.getElementById('emptyAuthBtn2');
+    const b = $('emptyAuthBtn');
     if (b) {
       b.disabled = !handlers.canAuth();
       b.addEventListener('click', handlers.onAddAccount);
     }
-    $('selectedDateLabel').textContent = '—';
+    setProp('selectedDateLabel', 'textContent', '—');
     return;
   }
 
   if (!ymd) {
-    $('selectedDateLabel').textContent = '日付を選択';
+    setProp('selectedDateLabel', 'textContent', '日付を選択');
     list.innerHTML = '<div class="empty-state"><p>日付を選択してください</p></div>';
     return;
   }
 
-  $('selectedDateLabel').textContent = formatSelectedLabel(ymd);
+  setProp('selectedDateLabel', 'textContent', formatSelectedLabel(ymd));
   const items = eventsForDate(state, ymd);
 
   if (!items.length) {
@@ -384,6 +410,7 @@ export function renderEventList(state, handlers) {
 
 export function openAccountMenu(account, anchor, actions) {
   const menu = $('accountMenu');
+  if (!menu || !anchor) return;
   menu.hidden = false;
   menu.innerHTML = '';
 
@@ -433,5 +460,6 @@ export function openAccountMenu(account, anchor, actions) {
 }
 
 export function closeAccountMenu() {
-  $('accountMenu').hidden = true;
+  const menu = $('accountMenu');
+  if (menu) menu.hidden = true;
 }
