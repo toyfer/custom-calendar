@@ -41,7 +41,6 @@ import {
   renderCalendar,
   renderEventList,
   setDisabled,
-  setHidden,
   setLoading,
   setProp,
   setStatus,
@@ -124,7 +123,7 @@ function maybeEnableAuth() {
 
   initTokenClient(state);
   setDisabled('authBtn', false);
-  setDisabled('emptyAuthBtn', false); // may no-op if not in DOM
+  setDisabled('emptyAuthBtn', false);
   setDisabled('addAccountBtn', false);
 
   paint();
@@ -184,8 +183,9 @@ async function reauth(accountId) {
   if (!acc) return;
   try {
     setLoading(true, `${acc.email} を再連携…`);
+    // force consent so new calendarlist scope is granted
     const account = await connectAccount(state, { mode: 'reauth', hintEmail: acc.email });
-    toast(`${account.email} を再連携しました`, 'ok');
+    toast(`${account.email} を再連携しました（スコープ更新）`, 'ok');
     paint();
     await fetchAll();
   } catch (err) {
@@ -211,21 +211,35 @@ async function fetchAll() {
   const targets = liveAccounts(state);
   if (!targets.length) {
     paint();
+    toast('有効なアカウントがありません。再連携してください', 'error');
     return;
   }
 
-  setLoading(true, '全アカウントの予定を取得中…');
+  setLoading(true, '全カレンダーから予定を取得中…');
   try {
     const results = await Promise.allSettled(targets.map((a) => fetchEventsForAccount(state, a)));
     const merged = [];
+    const metas = [];
     let fail = 0;
+
     results.forEach((r, i) => {
-      if (r.status === 'fulfilled') merged.push(...r.value);
-      else {
+      if (r.status === 'fulfilled') {
+        // new shape: { events, meta }
+        const payload = r.value;
+        const events = Array.isArray(payload) ? payload : payload.events || [];
+        const meta = Array.isArray(payload) ? null : payload.meta;
+        merged.push(...events);
+        if (meta) metas.push(meta);
+      } else {
         fail += 1;
         console.error(targets[i].email, r.reason);
         const msg = String(r.reason?.message || r.reason || '');
-        if (msg.includes('expired') || msg.includes('Login Required') || msg.includes('401')) {
+        if (
+          msg.includes('expired') ||
+          msg.includes('Login Required') ||
+          msg.includes('401') ||
+          r.reason?.status === 401
+        ) {
           targets[i].stale = true;
         }
       }
@@ -237,8 +251,29 @@ async function fetchAll() {
     await cacheEvents(state.events);
     persistAccounts(state);
     paint();
-    if (fail) toast(`${fail} アカウントの取得に失敗`, 'error');
-    else toast(`更新 ${merged.length} 件（重ね表示）`, 'ok');
+
+    // Human-readable summary
+    if (fail && !merged.length) {
+      toast(`${fail} アカウントの取得に失敗（コンソールを確認）`, 'error');
+    } else if (!merged.length) {
+      const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
+      toast(
+        `0 件（カレンダー ${calCount || '?'} 個を走査）。表示月を確認 / 再連携でスコープ更新`,
+        'error'
+      );
+      showBanner(
+        `取得は成功しましたが <strong>0 件</strong> でした。` +
+          `（走査カレンダー数: ${calCount || '不明'}）` +
+          ` 別月に予定がある・または権限不足の可能性があります。` +
+          ` チップの ▾ → <strong>再連携</strong> で新しいスコープを許可してください。`
+      );
+      console.info('[calendar] fetch meta', metas);
+    } else {
+      const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
+      toast(`更新 ${merged.length} 件 / カレンダー ${calCount || '?'} 個`, 'ok');
+      showBanner('');
+      console.info('[calendar] fetch meta', metas);
+    }
   } catch (err) {
     console.error(err);
     toast('取得失敗: ' + (err?.message || err), 'error');
@@ -304,7 +339,7 @@ async function onCreate(e) {
   setDisabled('createBtn', true);
   setLoading(true, `${acc.email} に作成中…`);
   try {
-    await insertEvent(state, accountId, resource);
+    await insertEvent(state, accountId, resource, 'primary');
     state.createAccountId = accountId;
     persistAccounts(state);
     setProp('eventTitle', 'value', '');
@@ -338,7 +373,7 @@ async function confirmDelete() {
 
   setLoading(true, '削除中…');
   try {
-    await apiDeleteEvent(state, ev.accountId, ev.id);
+    await apiDeleteEvent(state, ev.accountId, ev.id, ev.calendarId || 'primary');
     toast('削除しました', 'ok');
     await fetchAll();
   } catch (err) {
@@ -392,7 +427,6 @@ function wire() {
     setTimeout(() => location.reload(), 400);
   });
 
-  // emptyAuthBtn is recreated in event list; use event delegation
   on('authBtn', 'click', addAccount);
   on('addAccountBtn', 'click', addAccount);
   on('refreshBtn', 'click', fetchAll);
@@ -494,6 +528,7 @@ async function boot() {
 
   paint();
 
+  // GIS is enough for token model; don't hard-depend on gapi for readiness
   if (window.gapi && hasValidConfig(state)) {
     try {
       await new Promise((resolve) => {
@@ -501,16 +536,20 @@ async function boot() {
         else gapi.load('client', resolve);
       });
       await initGapiClient(state);
-      maybeEnableAuth();
     } catch (err) {
       console.error(err);
+      state.gapiReady = true;
     }
+  } else {
+    // REST-only path
+    state.gapiReady = true;
   }
 
   if (window.google?.accounts?.oauth2) {
     state.gisReady = true;
-    maybeEnableAuth();
   }
+
+  maybeEnableAuth();
 }
 
 if (document.readyState === 'loading') {
