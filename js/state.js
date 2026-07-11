@@ -1,16 +1,8 @@
 /** Application state + persistence (overlay-first multi-account) */
 
-import { PALETTE, STORAGE } from './constants.js';
+import { PALETTE, STORAGE, VIEWS } from './constants.js';
 import { local, session } from './storage.js';
 
-/**
- * Account shape:
- * {
- *   id, email, name, picture, color,
- *   visible: boolean,  // overlay layer on/off
- *   stale: boolean     // token missing/expired
- * }
- */
 export function createState() {
   return {
     clientId: '',
@@ -20,17 +12,25 @@ export function createState() {
     gisReady: false,
 
     accounts: [],
-    tokens: {}, // id -> { accessToken, expiresAt, scope }
-    createAccountId: null, // which account receives new events
+    tokens: {},
+    createAccountId: null,
+    createCalendarId: 'primary', // calendar id for create form
 
+    /** Writable calendars per account: accountId -> [{id, summary, primary, accessRole}] */
+    calendarsByAccount: {},
+
+    viewMode: VIEWS.month, // month | week | list
     viewYear: 0,
     viewMonth: 0,
     selectedDate: null,
     events: [],
 
     pendingDelete: null,
+    /** Edit modal target */
+    editingEvent: null,
+    /** Recurring edit scope: 'single' | 'all' | null */
+    recurringScope: null,
 
-    /** Last fetch diagnostic (not cleared by status pill updates) */
     lastFetchNote: '',
   };
 }
@@ -56,7 +56,6 @@ export function liveAccounts(state) {
   return state.accounts.filter((a) => !a.stale && state.tokens[a.id]?.accessToken);
 }
 
-/** Accounts whose events should appear in the overlay */
 export function visibleAccounts(state) {
   return state.accounts.filter((a) => a.visible !== false);
 }
@@ -73,6 +72,11 @@ export function markStaleFlags(state) {
   }
 }
 
+export function writableCalendars(state, accountId) {
+  const list = state.calendarsByAccount[accountId] || [];
+  return list.filter((c) => c.writable);
+}
+
 export function persistAccounts(state) {
   const meta = state.accounts.map(({ id, email, name, picture, color, visible }) => ({
     id,
@@ -86,6 +90,8 @@ export function persistAccounts(state) {
   session.set(STORAGE.tokens, state.tokens);
   local.set(STORAGE.ui, {
     createAccountId: state.createAccountId,
+    createCalendarId: state.createCalendarId,
+    viewMode: state.viewMode,
     viewYear: state.viewYear,
     viewMonth: state.viewMonth,
     selectedDate: state.selectedDate,
@@ -93,7 +99,6 @@ export function persistAccounts(state) {
 }
 
 export function restoreAccounts(state) {
-  // migrate v2 if present
   let accounts = local.get(STORAGE.accounts, null);
   if (!accounts) {
     const legacy = local.get('custom-calendar.accounts.v2', []);
@@ -111,16 +116,19 @@ export function restoreAccounts(state) {
   state.tokens = tokens || {};
 
   const ui = local.get(STORAGE.ui, {}) || {};
-  const legacyUi = local.get('custom-calendar.ui.v2', {});
-  state.createAccountId =
-    ui.createAccountId || legacyUi.activeAccountId || state.accounts[0]?.id || null;
+  const legacyUi = local.get('custom-calendar.ui.v3', {}) || local.get('custom-calendar.ui.v2', {}) || {};
+  const merged = { ...legacyUi, ...ui };
 
-  // Restore view if saved (same session UX)
-  if (typeof ui.viewYear === 'number' && typeof ui.viewMonth === 'number') {
-    state.viewYear = ui.viewYear;
-    state.viewMonth = ui.viewMonth;
+  state.createAccountId =
+    merged.createAccountId || merged.activeAccountId || state.accounts[0]?.id || null;
+  state.createCalendarId = merged.createCalendarId || 'primary';
+  state.viewMode = Object.values(VIEWS).includes(merged.viewMode) ? merged.viewMode : VIEWS.month;
+
+  if (typeof merged.viewYear === 'number' && typeof merged.viewMonth === 'number') {
+    state.viewYear = merged.viewYear;
+    state.viewMonth = merged.viewMonth;
   }
-  if (ui.selectedDate) state.selectedDate = ui.selectedDate;
+  if (merged.selectedDate) state.selectedDate = merged.selectedDate;
 
   markStaleFlags(state);
 }
@@ -159,8 +167,11 @@ export async function loadConfig(state) {
   return 'none';
 }
 
-/** Events for overlay = all events belonging to visible accounts */
 export function overlayEvents(state) {
   const visibleIds = new Set(visibleAccounts(state).map((a) => a.id));
   return state.events.filter((e) => visibleIds.has(e.accountId));
+}
+
+export function eventByUid(state, uid) {
+  return state.events.find((e) => e.uid === uid) || null;
 }

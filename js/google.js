@@ -1,6 +1,6 @@
 /** Google Identity + Calendar API access (REST; multi-calendar) */
 
-import { DISCOVERY_DOC, SCOPES } from './constants.js';
+import { DISCOVERY_DOC, SCOPES, WRITABLE_ROLES } from './constants.js';
 import {
   accountById,
   hasValidConfig,
@@ -17,11 +17,12 @@ export function normalizeEvent(item, account, calendarMeta = {}) {
   const start = item.start?.dateTime || item.start?.date;
   let end = item.end?.dateTime || item.end?.date;
   if (allDay && end) {
-    // all-day end is exclusive in Google Calendar API
     const d = new Date(`${end}T00:00:00`);
     d.setDate(d.getDate() - 1);
     end = toYmd(d);
   }
+  const recurringEventId = item.recurringEventId || '';
+  const isRecurring = !!(recurringEventId || item.recurrence);
   return {
     uid: `${account.id}:${calendarMeta.id || 'primary'}:${item.id}`,
     id: item.id,
@@ -38,11 +39,14 @@ export function normalizeEvent(item, account, calendarMeta = {}) {
     end,
     allDay,
     htmlLink: item.htmlLink || '',
+    recurringEventId,
+    isRecurring,
+    // originalStartTime for recurring instance patch
+    originalStartTime: item.originalStartTime || null,
   };
 }
 
 export async function initGapiClient(state) {
-  // Calendar uses REST; gapi is only needed if present for legacy hooks.
   if (typeof gapi === 'undefined' || !gapi.client) {
     state.gapiReady = true;
     return;
@@ -91,16 +95,11 @@ export function requestAccessToken(state, { prompt, hint } = {}) {
   });
 }
 
-/**
- * Silent token refresh (no consent UI). Returns true if refreshed.
- * On failure marks account stale — caller should prompt reauth.
- */
 export async function trySilentRefresh(state, accountId) {
   const acc = accountById(state, accountId);
   if (!acc || !state.tokenClient) return false;
   try {
     const resp = await requestAccessToken(state, {
-      // empty prompt = silent if browser session still has grant
       prompt: '',
       hint: acc.email,
     });
@@ -137,9 +136,7 @@ export async function connectAccount(state, { mode = 'add', hintEmail = '' } = {
   const id = info.sub;
   if (!id) throw new Error('no user id');
 
-  if (resp.scope) {
-    console.info('[calendar] granted scopes:', resp.scope);
-  }
+  if (resp.scope) console.info('[calendar] granted scopes:', resp.scope);
 
   let account = accountById(state, id);
   if (account) {
@@ -182,9 +179,11 @@ export async function revokeAndRemove(state, accountId) {
   }
   state.accounts = state.accounts.filter((a) => a.id !== accountId);
   delete state.tokens[accountId];
+  delete state.calendarsByAccount[accountId];
   state.events = state.events.filter((e) => e.accountId !== accountId);
   if (state.createAccountId === accountId) {
     state.createAccountId = liveAccounts(state)[0]?.id || state.accounts[0]?.id || null;
+    state.createCalendarId = 'primary';
   }
   persistAccounts(state);
 }
@@ -196,7 +195,6 @@ async function getValidToken(state, accountId) {
     if (!ok) throw new Error('token missing');
     return state.tokens[accountId].accessToken;
   }
-  // refresh 2 min before expiry
   if (tok.expiresAt && tok.expiresAt < Date.now() + 120_000) {
     const ok = await trySilentRefresh(state, accountId);
     if (ok) return state.tokens[accountId].accessToken;
@@ -240,16 +238,22 @@ async function calendarRequest(accessToken, path, { method = 'GET', body } = {})
   return data;
 }
 
-/** Inclusive local month window → RFC3339 (UTC via toISOString) */
 export function monthWindow(viewYear, viewMonth) {
   const start = new Date(viewYear, viewMonth, 1, 0, 0, 0, 0);
   const end = new Date(viewYear, viewMonth + 1, 0, 23, 59, 59, 999);
-  // pad ±1 day so timezone edge events are not dropped
   start.setDate(start.getDate() - 1);
   end.setDate(end.getDate() + 1);
   return {
     timeMin: start.toISOString(),
     timeMax: end.toISOString(),
+  };
+}
+
+/** Wider window for week/list — pad ±7 days around selected date's month */
+export function rangeWindow(timeMinDate, timeMaxDate) {
+  return {
+    timeMin: timeMinDate.toISOString(),
+    timeMax: timeMaxDate.toISOString(),
   };
 }
 
@@ -268,12 +272,14 @@ async function listCalendars(accessToken) {
           summary: c.summary || c.id,
           primary: !!c.primary,
           backgroundColor: c.backgroundColor,
+          accessRole: c.accessRole,
+          writable: WRITABLE_ROLES.has(c.accessRole),
         }));
     }
   } catch (err) {
     console.warn('[calendar] calendarList failed, using primary only', err);
   }
-  return [{ id: 'primary', summary: 'primary', primary: true }];
+  return [{ id: 'primary', summary: 'primary', primary: true, accessRole: 'owner', writable: true }];
 }
 
 async function listEventsForCalendar(accessToken, calendarId, timeMin, timeMax) {
@@ -303,15 +309,15 @@ async function listEventsForCalendar(accessToken, calendarId, timeMin, timeMax) 
   return all;
 }
 
-/**
- * Fetch events for one account across ALL calendars in the month window.
- * Returns { events, meta } for UI diagnostics.
- */
-export async function fetchEventsForAccount(state, account) {
+export async function fetchEventsForAccount(state, account, windowOverride = null) {
   const accessToken = await getValidToken(state, account.id);
-  const { timeMin, timeMax } = monthWindow(state.viewYear, state.viewMonth);
+  const { timeMin, timeMax } =
+    windowOverride || monthWindow(state.viewYear, state.viewMonth);
 
   const calendars = await listCalendars(accessToken);
+  // Cache calendar list for create form
+  state.calendarsByAccount[account.id] = calendars;
+
   console.info(
     `[calendar] ${account.email}: ${calendars.length} calendars, window ${timeMin} → ${timeMax}`
   );
@@ -368,11 +374,104 @@ export async function insertEvent(state, accountId, resource, calendarId = 'prim
   });
 }
 
-export async function deleteEvent(state, accountId, eventId, calendarId = 'primary') {
+/**
+ * Patch event. For recurring:
+ *  - scope 'single': patch this instance id
+ *  - scope 'all': patch recurringEventId (master)
+ */
+export async function patchEvent(
+  state,
+  accountId,
+  eventId,
+  resource,
+  calendarId = 'primary',
+  { scope = 'single', recurringEventId = '' } = {}
+) {
   const accessToken = await getValidToken(state, accountId);
+  const targetId =
+    scope === 'all' && recurringEventId ? recurringEventId : eventId;
   const encCal = encodeURIComponent(calendarId || 'primary');
-  const encEv = encodeURIComponent(eventId);
+  const encEv = encodeURIComponent(targetId);
+  return calendarRequest(accessToken, `/calendars/${encCal}/events/${encEv}`, {
+    method: 'PATCH',
+    body: resource,
+  });
+}
+
+export async function deleteEvent(
+  state,
+  accountId,
+  eventId,
+  calendarId = 'primary',
+  { scope = 'single', recurringEventId = '' } = {}
+) {
+  const accessToken = await getValidToken(state, accountId);
+  const targetId =
+    scope === 'all' && recurringEventId ? recurringEventId : eventId;
+  const encCal = encodeURIComponent(calendarId || 'primary');
+  const encEv = encodeURIComponent(targetId);
   return calendarRequest(accessToken, `/calendars/${encCal}/events/${encEv}`, {
     method: 'DELETE',
   });
+}
+
+/** Build Google event resource from form fields */
+export function buildEventResource({
+  summary,
+  description,
+  location,
+  allDay,
+  startLocal,
+  endLocal,
+  rrule,
+  timeZone,
+}) {
+  const resource = {
+    summary,
+    description: description || undefined,
+    location: location || undefined,
+  };
+
+  if (allDay) {
+    const s = startLocal.slice(0, 10);
+    let eDate = endLocal.slice(0, 10);
+    // exclusive end
+    const [y, m, d] = eDate.split('-').map(Number);
+    const ed = new Date(y, m - 1, d);
+    ed.setDate(ed.getDate() + 1);
+    eDate = `${ed.getFullYear()}-${String(ed.getMonth() + 1).padStart(2, '0')}-${String(ed.getDate()).padStart(2, '0')}`;
+    resource.start = { date: s };
+    resource.end = { date: eDate };
+  } else {
+    const start = new Date(startLocal);
+    const end = new Date(endLocal);
+    resource.start = { dateTime: start.toISOString(), timeZone };
+    resource.end = { dateTime: end.toISOString(), timeZone };
+  }
+
+  if (rrule) {
+    resource.recurrence = [`RRULE:${rrule}`];
+  }
+
+  return resource;
+}
+
+/** Resource for time-only move (drag) */
+export function buildTimePatch(ev, { start, end, allDay }, timeZone) {
+  if (allDay) {
+    const s = start.slice(0, 10);
+    let e = (end || start).slice(0, 10);
+    const [y, m, d] = e.split('-').map(Number);
+    const ed = new Date(y, m - 1, d);
+    ed.setDate(ed.getDate() + 1);
+    e = `${ed.getFullYear()}-${String(ed.getMonth() + 1).padStart(2, '0')}-${String(ed.getDate()).padStart(2, '0')}`;
+    return {
+      start: { date: s },
+      end: { date: e },
+    };
+  }
+  return {
+    start: { dateTime: new Date(start).toISOString(), timeZone },
+    end: { dateTime: new Date(end).toISOString(), timeZone },
+  };
 }
