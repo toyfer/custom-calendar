@@ -1,12 +1,19 @@
-/** DOM rendering & small UI widgets */
+/** DOM rendering & UI widgets — month / week / list + drag */
 
-import { DOW } from './constants.js';
+import { DOW, RECUR_PRESETS, VIEWS, WEEK_HOUR_END, WEEK_HOUR_START, WEEK_PX_PER_HOUR } from './constants.js';
 import {
+  addDays,
   compareEvents,
+  eventInRange,
   eventOnDate,
   formatEventTime,
   formatMonthLabel,
   formatSelectedLabel,
+  formatWeekLabel,
+  minutesFromMidnight,
+  parseYmd,
+  startOfWeek,
+  toLocalInputValue,
   toYmd,
 } from './dates.js';
 import {
@@ -14,11 +21,11 @@ import {
   liveAccounts,
   overlayEvents,
   visibleAccounts,
+  writableCalendars,
 } from './state.js';
 
 export const $ = (id) => document.getElementById(id);
 
-/** Safe property set — never throw if node missing */
 export function setProp(id, prop, value) {
   const el = $(id);
   if (el) el[prop] = value;
@@ -87,6 +94,28 @@ function eventsForDate(state, ymd) {
     .sort(compareEvents);
 }
 
+// ── View mode toggle ──────────────────────────────────────
+export function renderViewToggle(state) {
+  const root = $('viewToggle');
+  if (!root) return;
+  root.querySelectorAll('[data-view]').forEach((btn) => {
+    const active = btn.dataset.view === state.viewMode;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+export function updateNavLabel(state) {
+  if (state.viewMode === VIEWS.week) {
+    setProp('monthLabel', 'textContent', formatWeekLabel(state.selectedDate || toYmd(new Date())));
+  } else if (state.viewMode === VIEWS.list) {
+    setProp('monthLabel', 'textContent', formatMonthLabel(state.viewYear, state.viewMonth) + ' 一覧');
+  } else {
+    setProp('monthLabel', 'textContent', formatMonthLabel(state.viewYear, state.viewMonth));
+  }
+}
+
+// ── Accounts ──────────────────────────────────────────────
 export function renderAccounts(state, handlers) {
   const bar = $('accountBar');
   const chips = $('accountChips');
@@ -167,9 +196,36 @@ export function renderAccounts(state, handlers) {
       chip.appendChild(warn);
     }
 
+    // Click = toggle; long-press / contextmenu = menu (mobile friendly)
+    let pressTimer = null;
+    let longPressed = false;
+
+    chip.addEventListener('pointerdown', (ev) => {
+      if (ev.button && ev.button !== 0) return;
+      longPressed = false;
+      pressTimer = setTimeout(() => {
+        longPressed = true;
+        handlers.onAccountMenu(a, chip);
+        try {
+          chip.setPointerCapture?.(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }, 480);
+    });
+    const clearPress = () => {
+      if (pressTimer) clearTimeout(pressTimer);
+      pressTimer = null;
+    };
+    chip.addEventListener('pointerup', clearPress);
+    chip.addEventListener('pointercancel', clearPress);
+    chip.addEventListener('pointerleave', clearPress);
+
     chip.addEventListener('click', (ev) => {
-      // Ignore synthetic clicks (keyboard activate fires detail=0 on some browsers)
-      if (ev.detail === 0 && ev.pointerType === '') return;
+      if (longPressed) {
+        ev.preventDefault();
+        return;
+      }
       handlers.onToggleVisible(a.id);
     });
 
@@ -203,7 +259,6 @@ function updateStatusBanner(state) {
 
   if (live === 0) {
     setStatus('再連携が必要', 'warn');
-    // Prefer fetch diagnostic if present; otherwise token message
     if (!state.lastFetchNote) {
       showBanner(
         'セッションのトークンが切れています。アカウントの <strong>▾</strong> から「再連携」、または「+ アカウント」で追加してください。'
@@ -216,13 +271,13 @@ function updateStatusBanner(state) {
     }
   } else {
     setStatus(`${total} アカウント · 重ね表示 ${vis}`, 'ok');
-    // Only clear banner if no pending fetch note
     if (!state.lastFetchNote) showBanner('');
   }
 }
 
 export function renderCreateSelect(state) {
   const sel = $('createAccount');
+  const calSel = $('createCalendar');
   if (!sel) return;
   sel.innerHTML = '';
   const live = liveAccounts(state);
@@ -231,6 +286,13 @@ export function renderCreateSelect(state) {
     opt.value = '';
     opt.textContent = '連携アカウントがありません';
     sel.appendChild(opt);
+    if (calSel) {
+      calSel.innerHTML = '';
+      const o = document.createElement('option');
+      o.value = 'primary';
+      o.textContent = '—';
+      calSel.appendChild(o);
+    }
     return;
   }
   for (const a of live) {
@@ -244,6 +306,31 @@ export function renderCreateSelect(state) {
   } else {
     state.createAccountId = live[0].id;
     sel.value = live[0].id;
+  }
+  renderCalendarSelect(state);
+}
+
+export function renderCalendarSelect(state) {
+  const calSel = $('createCalendar');
+  if (!calSel) return;
+  calSel.innerHTML = '';
+  const accountId = state.createAccountId;
+  let cals = writableCalendars(state, accountId);
+  if (!cals.length) {
+    cals = [{ id: 'primary', summary: 'primary', primary: true }];
+  }
+  for (const c of cals) {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.primary ? `${c.summary}（メイン）` : c.summary;
+    calSel.appendChild(opt);
+  }
+  if (cals.some((c) => c.id === state.createCalendarId)) {
+    calSel.value = state.createCalendarId;
+  } else {
+    const primary = cals.find((c) => c.primary) || cals[0];
+    state.createCalendarId = primary.id;
+    calSel.value = primary.id;
   }
 }
 
@@ -267,10 +354,26 @@ export function renderLegend(state) {
     .join('');
 }
 
-export function renderCalendar(state, onSelectDate) {
+export function renderRecurSelect() {
+  const sel = $('eventRecur');
+  if (!sel || sel.options.length) return;
+  for (const p of RECUR_PRESETS) {
+    const opt = document.createElement('option');
+    opt.value = p.rrule;
+    opt.textContent = p.label;
+    sel.appendChild(opt);
+  }
+}
+
+// ── Month view ────────────────────────────────────────────
+export function renderMonth(state, { onSelectDate, onDropEvent }) {
   const grid = $('calendarGrid');
   if (!grid) return;
+  grid.className = 'calendar-grid';
   grid.innerHTML = '';
+  grid.hidden = false;
+  setHidden('weekView', true);
+  setHidden('listView', true);
 
   DOW.forEach((d, i) => {
     const el = document.createElement('div');
@@ -281,7 +384,7 @@ export function renderCalendar(state, onSelectDate) {
 
   const y = state.viewYear;
   const m = state.viewMonth;
-  setProp('monthLabel', 'textContent', formatMonthLabel(y, m));
+  updateNavLabel(state);
 
   const first = new Date(y, m, 1);
   const startPad = first.getDay();
@@ -299,6 +402,21 @@ export function renderCalendar(state, onSelectDate) {
       (ymd === todayYmd ? ' today' : '') +
       (ymd === state.selectedDate ? ' selected' : '') +
       (dow === 0 ? ' sun' : dow === 6 ? ' sat' : '');
+    el.dataset.ymd = ymd;
+
+    // Drop target for drag-move
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      el.classList.remove('drop-target');
+      const uid = e.dataTransfer.getData('text/event-uid');
+      if (uid && onDropEvent) onDropEvent(uid, ymd);
+    });
 
     const num = document.createElement('div');
     num.className = 'day-num';
@@ -310,8 +428,20 @@ export function renderCalendar(state, onSelectDate) {
       const mini = document.createElement('div');
       mini.className = 'event-mini' + (ev.allDay ? ' all-day' : '');
       mini.style.setProperty('--ev-color', ev.color);
-      mini.textContent = ev.summary;
+      mini.textContent = (ev.isRecurring ? '↻ ' : '') + ev.summary;
       mini.title = `${ev.summary}\n${formatEventTime(ev)} · ${ev.accountEmail}`;
+      mini.draggable = !accountById(state, ev.accountId)?.stale;
+      mini.dataset.uid = ev.uid;
+      mini.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/event-uid', ev.uid);
+        e.dataTransfer.effectAllowed = 'move';
+        mini.classList.add('dragging');
+      });
+      mini.addEventListener('dragend', () => mini.classList.remove('dragging'));
+      mini.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onSelectDate(ymd, ev);
+      });
       el.appendChild(mini);
     }
     if (dayEvents.length > 3) {
@@ -338,6 +468,316 @@ export function renderCalendar(state, onSelectDate) {
   }
 }
 
+// ── Week view ─────────────────────────────────────────────
+export function renderWeek(state, { onSelectDate, onEventClick, onTimeClick, onDropEvent }) {
+  const root = $('weekView');
+  const grid = $('calendarGrid');
+  if (!root) return;
+  if (grid) grid.hidden = true;
+  setHidden('listView', true);
+  root.hidden = false;
+  root.innerHTML = '';
+  updateNavLabel(state);
+
+  const anchor = parseYmd(state.selectedDate || toYmd(new Date()));
+  const weekStart = startOfWeek(anchor);
+  const todayYmd = toYmd(new Date());
+  const hours = WEEK_HOUR_END - WEEK_HOUR_START;
+  const totalH = hours * WEEK_PX_PER_HOUR;
+
+  // Header row: gutter + 7 days
+  const head = document.createElement('div');
+  head.className = 'week-head';
+  const gutterH = document.createElement('div');
+  gutterH.className = 'week-gutter-head';
+  head.appendChild(gutterH);
+
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(weekStart, i);
+    const ymd = toYmd(day);
+    const cell = document.createElement('div');
+    cell.className =
+      'week-day-head' +
+      (ymd === todayYmd ? ' today' : '') +
+      (ymd === state.selectedDate ? ' selected' : '') +
+      (day.getDay() === 0 ? ' sun' : day.getDay() === 6 ? ' sat' : '');
+    cell.innerHTML = `<span class="wd">${DOW[day.getDay()]}</span><span class="dn">${day.getDate()}</span>`;
+    cell.addEventListener('click', () => onSelectDate(ymd));
+    head.appendChild(cell);
+  }
+  root.appendChild(head);
+
+  // All-day row
+  const allDayRow = document.createElement('div');
+  allDayRow.className = 'week-allday';
+  const allDayLabel = document.createElement('div');
+  allDayLabel.className = 'week-gutter';
+  allDayLabel.textContent = '終日';
+  allDayRow.appendChild(allDayLabel);
+
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(weekStart, i);
+    const ymd = toYmd(day);
+    const cell = document.createElement('div');
+    cell.className = 'week-allday-cell';
+    cell.dataset.ymd = ymd;
+    cell.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      cell.classList.add('drop-target');
+    });
+    cell.addEventListener('dragleave', () => cell.classList.remove('drop-target'));
+    cell.addEventListener('drop', (e) => {
+      e.preventDefault();
+      cell.classList.remove('drop-target');
+      const uid = e.dataTransfer.getData('text/event-uid');
+      if (uid && onDropEvent) onDropEvent(uid, ymd);
+    });
+
+    const dayEvs = eventsForDate(state, ymd).filter((e) => e.allDay);
+    for (const ev of dayEvs) {
+      const pill = document.createElement('div');
+      pill.className = 'week-allday-pill';
+      pill.style.setProperty('--ev-color', ev.color);
+      pill.textContent = (ev.isRecurring ? '↻ ' : '') + ev.summary;
+      pill.draggable = !accountById(state, ev.accountId)?.stale;
+      pill.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/event-uid', ev.uid);
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onEventClick?.(ev);
+      });
+      cell.appendChild(pill);
+    }
+    allDayRow.appendChild(cell);
+  }
+  root.appendChild(allDayRow);
+
+  // Timed body
+  const body = document.createElement('div');
+  body.className = 'week-body';
+  body.style.setProperty('--week-h', `${totalH}px`);
+
+  const gutter = document.createElement('div');
+  gutter.className = 'week-gutter-col';
+  for (let h = WEEK_HOUR_START; h < WEEK_HOUR_END; h++) {
+    const lab = document.createElement('div');
+    lab.className = 'week-hour-label';
+    lab.style.top = `${(h - WEEK_HOUR_START) * WEEK_PX_PER_HOUR}px`;
+    lab.textContent = `${String(h).padStart(2, '0')}:00`;
+    gutter.appendChild(lab);
+  }
+  body.appendChild(gutter);
+
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(weekStart, i);
+    const ymd = toYmd(day);
+    const col = document.createElement('div');
+    col.className = 'week-col' + (ymd === todayYmd ? ' today' : '');
+    col.dataset.ymd = ymd;
+
+    // hour lines
+    for (let h = WEEK_HOUR_START; h < WEEK_HOUR_END; h++) {
+      const line = document.createElement('div');
+      line.className = 'week-hour-line';
+      line.style.top = `${(h - WEEK_HOUR_START) * WEEK_PX_PER_HOUR}px`;
+      col.appendChild(line);
+    }
+
+    // now indicator
+    if (ymd === todayYmd) {
+      const now = new Date();
+      const mins = minutesFromMidnight(now) - WEEK_HOUR_START * 60;
+      if (mins >= 0 && mins < hours * 60) {
+        const nowLine = document.createElement('div');
+        nowLine.className = 'week-now';
+        nowLine.style.top = `${(mins / 60) * WEEK_PX_PER_HOUR}px`;
+        col.appendChild(nowLine);
+      }
+    }
+
+    col.addEventListener('click', (e) => {
+      if (e.target !== col && !e.target.classList.contains('week-hour-line')) return;
+      const rect = col.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const mins = Math.round(((y / WEEK_PX_PER_HOUR) * 60) / 15) * 15;
+      const h = Math.floor(mins / 60) + WEEK_HOUR_START;
+      const m = mins % 60;
+      onTimeClick?.(ymd, h, m);
+    });
+
+    col.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      col.classList.add('drop-target');
+    });
+    col.addEventListener('dragleave', () => col.classList.remove('drop-target'));
+    col.addEventListener('drop', (e) => {
+      e.preventDefault();
+      col.classList.remove('drop-target');
+      const uid = e.dataTransfer.getData('text/event-uid');
+      if (!uid || !onDropEvent) return;
+      const rect = col.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const mins = Math.round(((y / WEEK_PX_PER_HOUR) * 60) / 15) * 15;
+      const h = Math.floor(mins / 60) + WEEK_HOUR_START;
+      const m = mins % 60;
+      onDropEvent(uid, ymd, { hour: h, minute: m });
+    });
+
+    const timed = eventsForDate(state, ymd).filter((e) => !e.allDay);
+    // simple overlap columns
+    const layout = layoutTimed(timed, ymd);
+    for (const { ev, colIndex, colCount, topMin, durationMin } of layout) {
+      const block = document.createElement('div');
+      block.className = 'week-event';
+      block.style.setProperty('--ev-color', ev.color);
+      block.style.top = `${(topMin / 60) * WEEK_PX_PER_HOUR}px`;
+      block.style.height = `${Math.max((durationMin / 60) * WEEK_PX_PER_HOUR, 18)}px`;
+      block.style.left = `calc(${(colIndex / colCount) * 100}% + 2px)`;
+      block.style.width = `calc(${(1 / colCount) * 100}% - 4px)`;
+      block.innerHTML = `<strong>${escapeHtml(ev.summary)}</strong><span>${escapeHtml(formatEventTime(ev))}</span>`;
+      block.title = `${ev.summary}\n${formatEventTime(ev)} · ${ev.accountEmail}`;
+      block.draggable = !accountById(state, ev.accountId)?.stale;
+      block.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/event-uid', ev.uid);
+        e.dataTransfer.effectAllowed = 'move';
+        block.classList.add('dragging');
+      });
+      block.addEventListener('dragend', () => block.classList.remove('dragging'));
+      block.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onEventClick?.(ev);
+      });
+      col.appendChild(block);
+    }
+
+    body.appendChild(col);
+  }
+  root.appendChild(body);
+
+  // scroll to ~8am or now
+  requestAnimationFrame(() => {
+    const scrollTarget = Math.max(0, (8 - WEEK_HOUR_START) * WEEK_PX_PER_HOUR - 20);
+    body.scrollTop = scrollTarget;
+  });
+}
+
+function layoutTimed(events, ymd) {
+  const items = events
+    .map((ev) => {
+      const s = new Date(ev.start);
+      const e = new Date(ev.end);
+      // clamp to this day
+      const dayStart = parseYmd(ymd);
+      const dayEnd = addDays(dayStart, 1);
+      const start = s < dayStart ? dayStart : s;
+      const end = e > dayEnd ? dayEnd : e;
+      let topMin = minutesFromMidnight(start) - WEEK_HOUR_START * 60;
+      let durationMin = Math.max(15, (end - start) / 60000);
+      if (topMin < 0) {
+        durationMin += topMin;
+        topMin = 0;
+      }
+      return { ev, topMin, durationMin, endMin: topMin + durationMin };
+    })
+    .filter((x) => x.durationMin > 0)
+    .sort((a, b) => a.topMin - b.topMin || b.durationMin - a.durationMin);
+
+  // greedy column assign
+  const cols = [];
+  const placed = [];
+  for (const item of items) {
+    let colIndex = 0;
+    for (; colIndex < cols.length; colIndex++) {
+      if (cols[colIndex] <= item.topMin) break;
+    }
+    if (colIndex === cols.length) cols.push(0);
+    cols[colIndex] = item.endMin;
+    placed.push({ ...item, colIndex });
+  }
+  // determine colCount per overlapping group — simplify: use max cols
+  const colCount = Math.max(1, cols.length);
+  return placed.map((p) => ({ ...p, colCount }));
+}
+
+// ── List view ─────────────────────────────────────────────
+export function renderListView(state, { onSelectDate, onEventClick }) {
+  const root = $('listView');
+  const grid = $('calendarGrid');
+  if (!root) return;
+  if (grid) grid.hidden = true;
+  setHidden('weekView', true);
+  root.hidden = false;
+  root.innerHTML = '';
+  updateNavLabel(state);
+
+  const y = state.viewYear;
+  const m = state.viewMonth;
+  const start = new Date(y, m, 1);
+  const end = new Date(y, m + 1, 0);
+  const startYmd = toYmd(start);
+  const endYmd = toYmd(end);
+
+  const events = overlayEvents(state)
+    .filter((ev) => eventInRange(ev, startYmd, endYmd))
+    .sort(compareEvents);
+
+  if (!events.length) {
+    root.innerHTML = '<div class="empty-state"><p>この月の表示中アカウントに予定はありません</p></div>';
+    return;
+  }
+
+  // group by start day
+  const groups = new Map();
+  for (const ev of events) {
+    const key = ev.allDay ? ev.start.slice(0, 10) : toYmd(new Date(ev.start));
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(ev);
+  }
+
+  const todayYmd = toYmd(new Date());
+  for (const [ymd, list] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const section = document.createElement('section');
+    section.className = 'list-day' + (ymd === todayYmd ? ' today' : '') + (ymd === state.selectedDate ? ' selected' : '');
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'list-day-head';
+    head.textContent = formatSelectedLabel(ymd);
+    head.addEventListener('click', () => onSelectDate(ymd));
+    section.appendChild(head);
+
+    for (const ev of list) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'list-event';
+      row.style.setProperty('--ev-color', ev.color);
+      row.innerHTML = `
+        <span class="list-time">${escapeHtml(formatEventTime(ev))}</span>
+        <span class="list-title">${ev.isRecurring ? '↻ ' : ''}${escapeHtml(ev.summary)}</span>
+        <span class="list-acct" style="--ev-color:${ev.color}">${escapeHtml(ev.accountEmail.split('@')[0])}</span>
+      `;
+      row.addEventListener('click', () => onEventClick?.(ev));
+      section.appendChild(row);
+    }
+    root.appendChild(section);
+  }
+}
+
+// ── Unified calendar render ───────────────────────────────
+export function renderCalendar(state, handlers) {
+  renderViewToggle(state);
+  if (state.viewMode === VIEWS.week) {
+    renderWeek(state, handlers);
+  } else if (state.viewMode === VIEWS.list) {
+    renderListView(state, handlers);
+  } else {
+    renderMonth(state, handlers);
+  }
+}
+
+// ── Side event list ───────────────────────────────────────
 export function renderEventList(state, handlers) {
   const list = $('eventList');
   if (!list) return;
@@ -388,19 +828,16 @@ export function renderEventList(state, handlers) {
 
     const title = document.createElement('div');
     title.className = 'title';
-    title.textContent = ev.summary;
+    title.textContent = (ev.isRecurring ? '↻ ' : '') + ev.summary;
 
     const meta = document.createElement('div');
     meta.className = 'meta';
     const calLabel =
-      ev.calendarName && ev.calendarName !== 'primary' && !String(ev.calendarId).includes('@')
-        ? escapeHtml(ev.calendarName)
-        : ev.calendarName && ev.calendarName !== 'primary'
-          ? escapeHtml(ev.calendarName)
-          : '';
+      ev.calendarName && ev.calendarName !== 'primary' ? escapeHtml(ev.calendarName) : '';
     meta.innerHTML = `<span>${escapeHtml(formatEventTime(ev))}</span>
       <span class="acct" style="--ev-color:${ev.color}">● ${escapeHtml(ev.accountEmail)}</span>
-      ${calLabel ? `<span class="cal-badge">${calLabel}</span>` : ''}`;
+      ${calLabel ? `<span class="cal-badge">${calLabel}</span>` : ''}
+      ${ev.isRecurring ? '<span class="recur-badge">繰り返し</span>' : ''}`;
 
     left.appendChild(title);
     left.appendChild(meta);
@@ -421,6 +858,14 @@ export function renderEventList(state, handlers) {
 
     const actions = document.createElement('div');
     actions.className = 'event-actions';
+
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'ghost sm';
+    edit.textContent = '編集';
+    edit.disabled = !!accountById(state, ev.accountId)?.stale;
+    edit.addEventListener('click', () => handlers.onEdit?.(ev));
+    actions.appendChild(edit);
 
     if (ev.htmlLink) {
       const open = document.createElement('a');
@@ -448,6 +893,7 @@ export function renderEventList(state, handlers) {
   }
 }
 
+// ── Account menu ──────────────────────────────────────────
 export function openAccountMenu(account, anchor, actions) {
   const menu = $('accountMenu');
   if (!menu || !anchor) return;
@@ -489,7 +935,6 @@ export function openAccountMenu(account, anchor, actions) {
   menu.style.top = `${rect.bottom + 6}px`;
   menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 240))}px`;
 
-  // Remove previous outside-click listener if any
   if (openAccountMenu._onDoc) {
     document.removeEventListener('click', openAccountMenu._onDoc);
     openAccountMenu._onDoc = null;
@@ -515,4 +960,56 @@ export function closeAccountMenu() {
     document.removeEventListener('click', openAccountMenu._onDoc);
     openAccountMenu._onDoc = null;
   }
+}
+
+// ── Edit modal helpers ────────────────────────────────────
+export function fillEditForm(ev) {
+  setProp('editTitle', 'value', ev.summary || '');
+  setProp('editDesc', 'value', ev.description || '');
+  setProp('editLocation', 'value', ev.location || '');
+  setProp('editAllDay', 'checked', !!ev.allDay);
+  const allDay = !!ev.allDay;
+  setProp('editStart', 'type', allDay ? 'date' : 'datetime-local');
+  setProp('editEnd', 'type', allDay ? 'date' : 'datetime-local');
+  if (allDay) {
+    setProp('editStart', 'value', (ev.start || '').slice(0, 10));
+    setProp('editEnd', 'value', (ev.end || ev.start || '').slice(0, 10));
+  } else {
+    setProp('editStart', 'value', toLocalInputValue(new Date(ev.start)));
+    setProp('editEnd', 'value', toLocalInputValue(new Date(ev.end)));
+  }
+  const scopeRow = $('editRecurScope');
+  if (scopeRow) {
+    scopeRow.hidden = !ev.isRecurring && !ev.recurringEventId;
+    const single = $('editScopeSingle');
+    if (single) single.checked = true;
+  }
+  setProp('editMeta', 'textContent', `${ev.accountEmail} · ${ev.calendarName || 'primary'}`);
+}
+
+export function openEditModal() {
+  $('editModal')?.classList.add('open');
+}
+
+export function closeEditModal() {
+  $('editModal')?.classList.remove('open');
+}
+
+export function openRecurScopeModal(kind /* 'edit' | 'delete' */) {
+  const m = $('recurScopeModal');
+  if (!m) return;
+  setProp('recurScopeTitle', 'textContent', kind === 'delete' ? '繰り返し予定の削除' : '繰り返し予定の編集');
+  setProp(
+    'recurScopeLead',
+    'textContent',
+    kind === 'delete'
+      ? 'この回だけ削除しますか？ それともシリーズ全体？'
+      : 'この回だけ変更しますか？ それともシリーズ全体？'
+  );
+  m.dataset.kind = kind;
+  m.classList.add('open');
+}
+
+export function closeRecurScopeModal() {
+  $('recurScopeModal')?.classList.remove('open');
 }
