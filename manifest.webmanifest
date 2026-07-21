@@ -1,0 +1,36 @@
+{
+  "name": "Custom Calendar",
+  "short_name": "Calendar",
+  "description": "複数 Google アカウントを重ねて表示・編集するカレンダー",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0c0e14",
+  "theme_color": "#0f1117",
+  "lang": "ja",
+  "dir": "ltr",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "今日",
+      "short_name": "今日",
+      "url": "./index.html?view=list",
+      "description": "今日の予定一覧"
+    }
+  ]
+}
