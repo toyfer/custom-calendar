@@ -5,9 +5,8 @@ import { CACHE_TTL_MS, DB } from './constants.js';
 function openDb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB.name, DB.version);
-    req.onupgradeneeded = (ev) => {
+    req.onupgradeneeded = () => {
       const db = req.result;
-      // v4: recreate events store with monthKey index
       if (db.objectStoreNames.contains(DB.store)) {
         db.deleteObjectStore(DB.store);
       }
@@ -33,7 +32,6 @@ function metaKey(accountId, mk) {
   return `fetch:${accountId}:${mk}`;
 }
 
-/** Stamp events with monthKey for the viewed month window */
 export function stampMonthKey(events, mk) {
   return (events || []).map((e) => ({ ...e, monthKey: mk }));
 }
@@ -44,35 +42,31 @@ export function stampMonthKey(events, mk) {
 export async function cacheMonthEvents(accountId, mk, events) {
   try {
     const db = await openDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction([DB.store, DB.meta], 'readwrite');
-      const store = tx.objectStore(DB.store);
-      const meta = tx.objectStore(DB.meta);
-      const idx = store.index('monthKey');
 
-      // Delete previous entries for this account in this month
-      const range = IDBKeyRange.only(mk);
-      const req = idx.openCursor(range);
+    // 1) collect keys to delete
+    const toDelete = await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB.store, 'readonly');
+      const idx = tx.objectStore(DB.store).index('monthKey');
+      const keys = [];
+      const req = idx.openCursor(IDBKeyRange.only(mk));
       req.onsuccess = () => {
         const cursor = req.result;
         if (cursor) {
-          if (cursor.value.accountId === accountId) cursor.delete();
+          if (cursor.value.accountId === accountId) keys.push(cursor.primaryKey);
           cursor.continue();
+        } else {
+          resolve(keys);
         }
       };
-
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-
-      // After deletes in same tx — put new (cursor is async within tx)
-      // Use separate put after cursor finishes via oncomplete of a nested approach:
+      req.onerror = () => reject(req.error);
     });
 
-    // Second tx: put events + meta (cursor delete completed)
+    // 2) delete + put + meta
     await new Promise((resolve, reject) => {
       const tx = db.transaction([DB.store, DB.meta], 'readwrite');
       const store = tx.objectStore(DB.store);
       const meta = tx.objectStore(DB.meta);
+      for (const k of toDelete) store.delete(k);
       for (const e of stampMonthKey(events, mk)) {
         store.put({ ...e, monthKey: mk });
       }
@@ -114,16 +108,13 @@ export async function loadMonthEvents(mk) {
 /** When each account was last fetched for this month */
 export async function loadMonthMeta(accountIds, mk) {
   const out = {};
+  if (!accountIds?.length) return out;
   try {
     const db = await openDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB.meta, 'readonly');
       const store = tx.objectStore(DB.meta);
       let pending = accountIds.length;
-      if (!pending) {
-        resolve();
-        return;
-      }
       for (const id of accountIds) {
         const req = store.get(metaKey(id, mk));
         req.onsuccess = () => {
@@ -156,15 +147,13 @@ export function allAccountsFresh(accountIds, metaMap, ttl = CACHE_TTL_MS) {
   return accountIds.every((id) => isFresh(metaMap[id], ttl));
 }
 
-/** Legacy: full dump (boot fallback) */
+/** Merge helper used when removing an account from memory */
 export async function cacheEvents(events) {
-  // no-op clear-all deprecated — keep for removeAccount path: rewrite via month keys if present
   try {
     const db = await openDb();
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB.store, 'readwrite');
       const store = tx.objectStore(DB.store);
-      // Remove events for accounts not in the list? Just put all with unknown month
       store.clear();
       for (const e of events) store.put(e);
       tx.oncomplete = () => resolve();
@@ -172,7 +161,7 @@ export async function cacheEvents(events) {
     });
     db.close();
   } catch {
-    /* cache is optional */
+    /* optional */
   }
 }
 
@@ -200,6 +189,7 @@ export async function purgeAccountCache(accountId) {
       const tx = db.transaction([DB.store, DB.meta], 'readwrite');
       const store = tx.objectStore(DB.store);
       const meta = tx.objectStore(DB.meta);
+
       const idx = store.index('accountId');
       const req = idx.openCursor(IDBKeyRange.only(accountId));
       req.onsuccess = () => {
@@ -209,7 +199,7 @@ export async function purgeAccountCache(accountId) {
           cursor.continue();
         }
       };
-      // meta keys are fetch:accountId:YYYY-MM — scan all meta
+
       const mreq = meta.openCursor();
       mreq.onsuccess = () => {
         const c = mreq.result;
@@ -218,6 +208,7 @@ export async function purgeAccountCache(accountId) {
           c.continue();
         }
       };
+
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
