@@ -1,4 +1,4 @@
-/* Overlay chips + week/list views + drag + mobile + edit extras */
+/* Overlay chips + week/list views + drag + mobile PWA + edit extras */
 
 /* ── Chip states ─────────────────────────────────────────── */
 .chip.visible {
@@ -72,6 +72,26 @@
   font-style: normal;
   color: var(--accent);
   font-size: 0.7rem;
+}
+
+/* ── Offline / cache ─────────────────────────────────────── */
+.offline-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.4rem 0.75rem;
+  padding-top: max(0.4rem, env(safe-area-inset-top));
+  background: rgba(255, 184, 107, 0.18);
+  color: #ffd7a8;
+  border-bottom: 1px solid rgba(255, 184, 107, 0.35);
+}
+
+body.is-offline .status-pill {
+  color: var(--warning);
+  border-color: rgba(255, 184, 107, 0.4);
 }
 
 /* ── View toggle ─────────────────────────────────────────── */
@@ -517,10 +537,36 @@
   white-space: nowrap;
 }
 
+/* ── Composer sheet (desktop: static in side panel) ─────── */
+.composer-sheet {
+  /* desktop: just a block */
+}
+
+.composer-grab {
+  display: none;
+}
+
+.composer-head {
+  display: none;
+}
+
+/* ── Bottom nav (mobile only) ────────────────────────────── */
+.bottom-nav {
+  display: none;
+}
+
 /* ── Mobile ──────────────────────────────────────────────── */
 @media (max-width: 960px) {
   .hide-mobile {
     display: none !important;
+  }
+
+  .app {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+
+  .brand-sub {
+    display: none;
   }
 
   .header-right {
@@ -537,7 +583,7 @@
   }
 
   .week-body {
-    max-height: min(50vh, 420px);
+    max-height: min(48vh, 400px);
   }
 
   .week-head,
@@ -548,6 +594,7 @@
 
   .week-view {
     overflow-x: auto;
+    max-height: min(58vh, 520px);
   }
 
   .week-event strong {
@@ -560,7 +607,7 @@
 
   .chip {
     max-width: 140px;
-    min-height: 2rem;
+    min-height: 2.1rem;
   }
 
   .chip-menu-btn {
@@ -581,17 +628,153 @@
     grid-column: 2;
   }
 
-  /* Larger touch targets for day cells on month */
   .day {
-    min-height: 72px;
+    min-height: 68px;
+  }
+
+  .list-view {
+    max-height: none;
+  }
+
+  /* Side panel stacks under calendar */
+  .side-panel .card-form {
+    /* form lives in sheet on mobile */
+  }
+
+  /* Composer becomes bottom sheet */
+  .composer-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(5, 8, 16, 0.55);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+
+  .composer-sheet.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .composer-panel {
+    width: 100%;
+    max-height: min(88vh, 720px);
+    overflow: auto;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 18px 18px 0 0;
+    padding: 0.5rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+    transform: translateY(110%);
+    transition: transform 0.22s ease;
+  }
+
+  .composer-sheet.open .composer-panel {
+    transform: translateY(0);
+  }
+
+  .composer-grab {
+    display: block;
+    width: 40px;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--border);
+    margin: 0.25rem auto 0.65rem;
+  }
+
+  .composer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+
+  .composer-head h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .card-form {
+    border: none;
+    background: transparent;
+    padding: 0;
+  }
+
+  /* Bottom nav */
+  .bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 35;
+    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border);
+    padding: 0.35rem 0.25rem calc(0.35rem + env(safe-area-inset-bottom));
+    gap: 0.15rem;
+  }
+
+  .bottom-nav button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.35rem 0.2rem;
+    min-height: 3rem;
+  }
+
+  .bottom-nav button.active {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .bottom-nav .nav-ico {
+    font-size: 1.05rem;
+    line-height: 1;
+  }
+
+  .bottom-nav .nav-fab {
+    width: 3.1rem;
+    height: 3.1rem;
+    margin: -0.85rem auto 0;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #8ea4ff, var(--accent));
+    color: #0b1020;
+    font-size: 1.5rem;
+    font-weight: 700;
+    box-shadow: 0 8px 24px rgba(108, 140, 255, 0.4);
+    min-height: 0;
+    padding: 0;
+  }
+
+  .bottom-nav .nav-fab span {
+    line-height: 1;
+  }
+
+  .modal {
+    max-height: min(90vh, 640px);
+    overflow: auto;
+  }
+
+  .toast {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom));
   }
 }
 
 @media (max-width: 520px) {
-  .brand span {
-    display: none;
-  }
-
   .topbar {
     gap: 0.5rem;
   }
@@ -615,13 +798,60 @@
   .week-body {
     min-width: 520px;
   }
+
+  .actions .primary {
+    padding-inline: 0.7rem;
+  }
 }
 
-/* Prevent pull-to-refresh fighting with week scroll on some mobile browsers */
-.week-body {
+/* Desktop: hide bottom nav, show composer inline */
+@media (min-width: 961px) {
+  .bottom-nav {
+    display: none !important;
+  }
+
+  .composer-sheet {
+    position: static;
+    background: none;
+    opacity: 1;
+    pointer-events: auto;
+    display: block;
+  }
+
+  .composer-panel {
+    transform: none;
+    max-height: none;
+    overflow: visible;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .composer-grab,
+  .composer-head {
+    display: none !important;
+  }
+
+  .card-form {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0.85rem;
+    background: rgba(0, 0, 0, 0.15);
+  }
+}
+
+.week-body,
+.list-view,
+.event-list {
   overscroll-behavior: contain;
 }
 
-.list-view {
-  overscroll-behavior: contain;
+/* Reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  .composer-panel,
+  .composer-sheet {
+    transition: none;
+  }
 }
