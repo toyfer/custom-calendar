@@ -18,9 +18,13 @@ export const STORAGE = {
 
 export const DB = {
   name: 'custom-calendar-db',
-  version: 3,
+  version: 4,
   store: 'events',
+  meta: 'meta',
 };
+
+/** Soft TTL for cached months (ms). UI shows cache immediately; network refreshes in background. */
+export const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
