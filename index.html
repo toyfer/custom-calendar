@@ -4,35 +4,49 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Custom Calendar</title>
-    <meta name="description" content="Multi-account overlay Google Calendar UI — faster than the official app" />
+    <meta name="description" content="複数 Google アカウントを重ねて表示・編集する PWA カレンダー" />
     <meta name="theme-color" content="#0f1117" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon.svg" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./styles.overlay.css" />
   </head>
   <body>
     <div class="app">
+      <div id="offlineBar" class="offline-bar" hidden role="status">
+        オフライン · キャッシュを表示中
+      </div>
+
       <header class="topbar">
         <div class="brand">
           <div class="logo" aria-hidden="true">C</div>
           <div>
             <h1>Custom Calendar</h1>
-            <span>複数アカウント重ね表示 · 週/月/一覧 · ドラッグ移動</span>
+            <span class="brand-sub">複数アカウント重ね表示 · PWA</span>
           </div>
         </div>
 
         <div class="actions">
           <div id="accountBar" class="account-bar" hidden>
-            <div id="accountChips" class="account-chips" role="list" aria-label="アカウント（タップで表示ON/OFF · 長押しでメニュー）"></div>
+            <div
+              id="accountChips"
+              class="account-chips"
+              role="list"
+              aria-label="アカウント（タップで表示ON/OFF · 長押しでメニュー）"
+            ></div>
             <button id="addAccountBtn" class="ghost sm" type="button" title="アカウントを追加">
-              + アカウント
+              +
             </button>
           </div>
 
           <span id="statusPill" class="status-pill">未接続</span>
-          <button id="settingsBtn" class="ghost sm" type="button" title="設定">⚙</button>
-          <button id="authBtn" class="primary" type="button" disabled>Google で連携</button>
-          <button id="refreshBtn" class="ghost sm" type="button" disabled title="再取得">↻</button>
+          <button id="settingsBtn" class="ghost sm" type="button" title="設定" aria-label="設定">⚙</button>
+          <button id="authBtn" class="primary" type="button" disabled>連携</button>
+          <button id="refreshBtn" class="ghost sm" type="button" disabled title="再取得" aria-label="再取得">↻</button>
         </div>
       </header>
 
@@ -47,13 +61,13 @@
               <button id="nextMonthBtn" class="icon-btn" type="button" aria-label="次へ">›</button>
               <button id="todayBtn" class="ghost sm" type="button">今日</button>
             </div>
-            <div class="header-right">
+            <div class="header-right hide-mobile">
               <div id="viewToggle" class="view-toggle" role="group" aria-label="表示切替">
                 <button type="button" data-view="month" class="active" aria-pressed="true">月</button>
                 <button type="button" data-view="week" aria-pressed="false">週</button>
                 <button type="button" data-view="list" aria-pressed="false">一覧</button>
               </div>
-              <p class="panel-hint hide-mobile">ドラッグで移動 · M/W/L で表示切替</p>
+              <p class="panel-hint">ドラッグで移動 · M/W/L</p>
             </div>
           </div>
 
@@ -64,7 +78,7 @@
           <div id="legend" class="legend" hidden></div>
         </section>
 
-        <section class="panel side-panel">
+        <section class="panel side-panel" id="sidePanel">
           <div class="panel-header">
             <h2>予定</h2>
             <span id="selectedDateLabel" class="selected-date">—</span>
@@ -78,64 +92,93 @@
               </div>
             </div>
 
-            <form id="createForm" class="form card-form">
-              <div class="form-head">
-                <h3>予定を追加</h3>
+            <!-- Desktop: inline form. Mobile: moved into sheet via CSS / same form id -->
+            <div id="composerSheet" class="composer-sheet" aria-hidden="true">
+              <div class="composer-panel">
+                <div class="composer-grab" aria-hidden="true"></div>
+                <div class="composer-head">
+                  <h3>予定を追加</h3>
+                  <button id="composerClose" class="icon-btn" type="button" aria-label="閉じる">×</button>
+                </div>
+                <form id="createForm" class="form card-form">
+                  <label>
+                    作成先アカウント
+                    <select id="createAccount" class="account-select-full" title="作成先アカウント"></select>
+                  </label>
+                  <label>
+                    カレンダー
+                    <select id="createCalendar" class="account-select-full" title="作成先カレンダー"></select>
+                  </label>
+                  <label>
+                    タイトル
+                    <input id="eventTitle" type="text" required placeholder="例: 打ち合わせ" autocomplete="off" />
+                  </label>
+                  <div class="form-row">
+                    <label>
+                      開始
+                      <input id="eventStart" type="datetime-local" required />
+                    </label>
+                    <label>
+                      終了
+                      <input id="eventEnd" type="datetime-local" required />
+                    </label>
+                  </div>
+                  <label class="check-row">
+                    <input id="eventAllDay" type="checkbox" />
+                    <span>終日</span>
+                  </label>
+                  <label>
+                    繰り返し
+                    <select id="eventRecur" class="account-select-full"></select>
+                  </label>
+                  <label>
+                    場所
+                    <input id="eventLocation" type="text" placeholder="任意" autocomplete="off" />
+                  </label>
+                  <label>
+                    メモ
+                    <textarea id="eventDesc" placeholder="任意"></textarea>
+                  </label>
+                  <div class="form-actions">
+                    <button id="createBtn" class="primary" type="submit" disabled>作成</button>
+                  </div>
+                </form>
               </div>
-              <label>
-                作成先アカウント
-                <select id="createAccount" class="account-select-full" title="作成先アカウント"></select>
-              </label>
-              <label>
-                カレンダー
-                <select id="createCalendar" class="account-select-full" title="作成先カレンダー"></select>
-              </label>
-              <label>
-                タイトル
-                <input id="eventTitle" type="text" required placeholder="例: 打ち合わせ" autocomplete="off" />
-              </label>
-              <div class="form-row">
-                <label>
-                  開始
-                  <input id="eventStart" type="datetime-local" required />
-                </label>
-                <label>
-                  終了
-                  <input id="eventEnd" type="datetime-local" required />
-                </label>
-              </div>
-              <label class="check-row">
-                <input id="eventAllDay" type="checkbox" />
-                <span>終日</span>
-              </label>
-              <label>
-                繰り返し
-                <select id="eventRecur" class="account-select-full"></select>
-              </label>
-              <label>
-                場所
-                <input id="eventLocation" type="text" placeholder="任意" autocomplete="off" />
-              </label>
-              <label>
-                メモ
-                <textarea id="eventDesc" placeholder="任意"></textarea>
-              </label>
-              <div class="form-actions">
-                <button id="createBtn" class="primary" type="submit" disabled>作成</button>
-              </div>
-            </form>
+            </div>
           </div>
         </section>
       </main>
 
-      <footer class="footer">
-        <span>重ね表示 · 週/月/一覧 · ドラッグ移動 · データは Google Calendar · トークンはブラウザ内のみ</span>
+      <footer class="footer hide-mobile">
+        <span>PWA · キャッシュ優先 · 複数アカウント重ね表示 · トークンはブラウザ内のみ</span>
       </footer>
     </div>
 
+    <!-- Mobile bottom navigation -->
+    <nav id="bottomNav" class="bottom-nav" aria-label="メインナビ">
+      <button type="button" data-nav-view="month" class="active">
+        <span class="nav-ico" aria-hidden="true">▦</span>
+        <span>月</span>
+      </button>
+      <button type="button" data-nav-view="week">
+        <span class="nav-ico" aria-hidden="true">☰</span>
+        <span>週</span>
+      </button>
+      <button type="button" id="fabAdd" class="nav-fab" aria-label="予定を追加">
+        <span aria-hidden="true">＋</span>
+      </button>
+      <button type="button" data-nav-view="list">
+        <span class="nav-ico" aria-hidden="true">≡</span>
+        <span>一覧</span>
+      </button>
+      <button type="button" id="navToday" class="ghost-nav" onclick="document.getElementById('todayBtn')?.click()">
+        <span class="nav-ico" aria-hidden="true">◎</span>
+        <span>今日</span>
+      </button>
+    </nav>
+
     <div id="accountMenu" class="account-menu" hidden role="menu"></div>
 
-    <!-- Settings -->
     <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal">
         <div class="modal-head">
@@ -155,8 +198,7 @@
             <input id="cfgApiKey" type="text" placeholder="AIza..." autocomplete="off" />
           </label>
           <p class="hint">
-            複数アカウントを使う場合、OAuth 同意画面が Testing なら
-            <strong>すべての</strong> Google アカウントを Test users に追加してください。
+            ホーム画面に追加するとアプリのように使えます。予定データは端末の IndexedDB にキャッシュされ、API 呼び出しを抑えます。
           </p>
           <div class="form-actions">
             <button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button>
@@ -167,7 +209,6 @@
       </div>
     </div>
 
-    <!-- Edit event -->
     <div id="editModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="editTitleLabel">
       <div class="modal">
         <div class="modal-head">
@@ -214,7 +255,6 @@
       </div>
     </div>
 
-    <!-- Recurring scope -->
     <div id="recurScopeModal" class="modal-backdrop" role="dialog" aria-modal="true">
       <div class="modal modal-sm">
         <h3 id="recurScopeTitle">繰り返し予定</h3>
@@ -227,7 +267,6 @@
       </div>
     </div>
 
-    <!-- Confirm delete -->
     <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
       <div class="modal modal-sm">
         <h3>予定を削除</h3>
