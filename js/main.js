@@ -1,10 +1,17 @@
 /**
  * Custom Calendar — entry point
- * Multi-account OVERLAY · month/week/list · drag · multi-calendar create · recurring edit
+ * Multi-account OVERLAY · PWA · cache-first API · month/week/list
  */
 
 import { VIEWS } from './constants.js';
-import { cacheEvents, loadCachedEvents } from './cache.js';
+import {
+  allAccountsFresh,
+  cacheMonthEvents,
+  loadMonthEvents,
+  loadMonthMeta,
+  monthKey,
+  purgeAccountCache,
+} from './cache.js';
 import {
   addDays,
   clampYmdToMonth,
@@ -64,18 +71,32 @@ import {
 } from './ui.js';
 
 const state = createState();
+state.online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+state.fromCache = false;
+
 let fetchSeq = 0;
 let fetchInFlight = null;
-
-// Pending action after recurring scope choice
-let pendingRecurAction = null; // { type: 'edit'|'delete'|'move', ev, payload? }
+let pendingRecurAction = null;
 
 function tz() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
+function currentMonthKey() {
+  return monthKey(state.viewYear, state.viewMonth);
+}
+
+function updateConnectivityUi() {
+  const bar = $('offlineBar');
+  if (bar) bar.hidden = !!state.online;
+  document.body.classList.toggle('is-offline', !state.online);
+  document.body.classList.toggle('from-cache', !!state.fromCache && state.online);
+}
+
 // ── render ────────────────────────────────────────────────
 function paint() {
+  updateConnectivityUi();
+
   renderAccounts(state, {
     canAuth: () => hasValidConfig(state) && !!state.tokenClient,
     onToggleVisible: (id) => {
@@ -125,7 +146,6 @@ function paint() {
           return;
         }
       } else {
-        // keep viewYear/Month in sync with selected
         state.viewYear = d.getFullYear();
         state.viewMonth = d.getMonth();
       }
@@ -147,6 +167,8 @@ function paint() {
       setProp('eventEnd', 'value', toLocalInputValue(end));
       persistAccounts(state);
       paint();
+      // Mobile: open composer sheet
+      openComposer(true);
       $('eventTitle')?.focus();
     },
     onDropEvent: (uid, ymd, timeHint) => handleDrop(uid, ymd, timeHint),
@@ -157,6 +179,11 @@ function paint() {
     onAddAccount: () => addAccount(),
     onDelete: (ev) => askDelete(ev),
     onEdit: (ev) => openEdit(ev),
+  });
+
+  // Bottom nav active state
+  document.querySelectorAll('[data-nav-view]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.navView === state.viewMode);
   });
 }
 
@@ -172,6 +199,13 @@ function fillDefaultTimes(ymd) {
   setProp('eventEnd', 'value', toLocalInputValue(end));
 }
 
+function openComposer(open) {
+  const sheet = $('composerSheet');
+  if (!sheet) return;
+  sheet.classList.toggle('open', !!open);
+  document.body.classList.toggle('composer-open', !!open);
+}
+
 function shiftView(delta) {
   if (state.viewMode === VIEWS.week) {
     const d = parseYmd(state.selectedDate || toYmd(new Date()));
@@ -180,7 +214,6 @@ function shiftView(delta) {
     state.viewYear = next.getFullYear();
     state.viewMonth = next.getMonth();
   } else {
-    // month + list
     state.viewMonth += delta;
     if (state.viewMonth < 0) {
       state.viewMonth = 11;
@@ -203,7 +236,6 @@ function setViewMode(mode) {
   state.viewMode = mode;
   persistAccounts(state);
   paint();
-  // week may need wider window already covered by month pad; refetch for safety
   if (liveAccounts(state).length) fetchAll();
 }
 
@@ -259,7 +291,7 @@ async function addAccount() {
     state.lastFetchNote = '';
     showBanner('');
     paint();
-    await fetchAll();
+    await fetchAll({ force: true });
   } catch (err) {
     console.error(err);
     const msg = err?.error || err?.message || String(err);
@@ -285,7 +317,7 @@ async function reauth(accountId) {
     toast(`${account.email} を再連携しました（スコープ更新）`, 'ok');
     state.lastFetchNote = '';
     paint();
-    await fetchAll();
+    await fetchAll({ force: true });
   } catch (err) {
     console.error(err);
     toast('再連携失敗: ' + (err?.error || err?.message || err), 'error');
@@ -299,26 +331,23 @@ async function removeAccount(accountId) {
   if (!acc) return;
   if (!confirm(`${acc.email} をこのアプリから外しますか？`)) return;
   await revokeAndRemove(state, accountId);
-  await cacheEvents(state.events);
+  await purgeAccountCache(accountId);
+  state.events = state.events.filter((e) => e.accountId !== accountId);
   toast('アカウントを外しました');
   paint();
 }
 
-// ── fetch ─────────────────────────────────────────────────
+// ── fetch (cache-first) ───────────────────────────────────
 function fetchWindow() {
-  // Always cover current month ±1 day; week also covered since selected is in month
-  // Expand: if week view, ensure week days included
   if (state.viewMode === VIEWS.week && state.selectedDate) {
     const ws = startOfWeek(parseYmd(state.selectedDate));
     const we = addDays(ws, 6);
-    // also pad month of week
     const start = new Date(ws);
     start.setDate(start.getDate() - 1);
     start.setHours(0, 0, 0, 0);
     const end = new Date(we);
     end.setDate(end.getDate() + 1);
     end.setHours(23, 59, 59, 999);
-    // union with month window
     const mStart = new Date(state.viewYear, state.viewMonth, 0, 0, 0, 0, 0);
     const mEnd = new Date(state.viewYear, state.viewMonth + 1, 1, 23, 59, 59, 999);
     const tMin = start < mStart ? start : mStart;
@@ -332,7 +361,18 @@ function fetchWindow() {
   return { timeMin: start.toISOString(), timeMax: end.toISOString() };
 }
 
-async function fetchAll() {
+async function applyCachedMonth(mk) {
+  const cached = await loadMonthEvents(mk);
+  if (!cached.length) return false;
+  // Keep events from other months already in memory? Prefer month slice for display
+  const other = state.events.filter((e) => e.monthKey && e.monthKey !== mk);
+  state.events = [...other, ...cached];
+  state.fromCache = true;
+  return true;
+}
+
+async function fetchAll(opts = {}) {
+  const force = !!opts.force;
   const mySeq = ++fetchSeq;
   if (fetchInFlight) {
     try {
@@ -344,6 +384,45 @@ async function fetchAll() {
   }
 
   const run = (async () => {
+    const mk = currentMonthKey();
+    const targets = liveAccounts(state);
+
+    // 1) Paint from cache immediately
+    const hadCache = await applyCachedMonth(mk);
+    if (hadCache) paint();
+
+    if (!targets.length) {
+      paint();
+      if (state.accounts.length) toast('有効なアカウントがありません。再連携してください', 'error');
+      return;
+    }
+
+    // 2) Skip network if all fresh (unless force / offline)
+    const metaMap = await loadMonthMeta(
+      targets.map((a) => a.id),
+      mk
+    );
+    const fresh = !force && allAccountsFresh(
+      targets.map((a) => a.id),
+      metaMap
+    );
+
+    if (!state.online) {
+      state.fromCache = hadCache;
+      paint();
+      if (hadCache) toast('オフライン · キャッシュを表示', 'ok');
+      else toast('オフライン · キャッシュがありません', 'error');
+      return;
+    }
+
+    if (fresh && hadCache) {
+      state.fromCache = true;
+      setStatus(`${targets.length} アカウント · キャッシュ`, 'ok');
+      paint();
+      return;
+    }
+
+    // 3) Soft refresh tokens then network
     for (const a of state.accounts) {
       const tok = state.tokens[a.id];
       if (tok?.accessToken && tok.expiresAt && tok.expiresAt < Date.now() + 120_000) {
@@ -351,35 +430,37 @@ async function fetchAll() {
       }
     }
 
-    const targets = liveAccounts(state);
-    if (!targets.length) {
+    const live = liveAccounts(state);
+    if (!live.length) {
       paint();
       toast('有効なアカウントがありません。再連携してください', 'error');
       return;
     }
 
-    setLoading(true, '全カレンダーから予定を取得中…');
+    // Background refresh: light loading if we already showed cache
+    setLoading(!hadCache, hadCache ? 'バックグラウンド更新…' : '全カレンダーから予定を取得中…');
     try {
       const win = fetchWindow();
-      const results = await Promise.allSettled(
-        targets.map((a) => fetchEventsForAccount(state, a, win))
-      );
+      const results = await Promise.allSettled(live.map((a) => fetchEventsForAccount(state, a, win)));
       if (mySeq !== fetchSeq) return;
 
       const merged = [];
       const metas = [];
       let fail = 0;
 
-      results.forEach((r, i) => {
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        const acc = live[i];
         if (r.status === 'fulfilled') {
           const payload = r.value;
           const events = Array.isArray(payload) ? payload : payload.events || [];
           const meta = Array.isArray(payload) ? null : payload.meta;
           merged.push(...events);
           if (meta) metas.push(meta);
+          await cacheMonthEvents(acc.id, mk, events);
         } else {
           fail += 1;
-          console.error(targets[i].email, r.reason);
+          console.error(acc.email, r.reason);
           const msg = String(r.reason?.message || r.reason || '');
           if (
             msg.includes('expired') ||
@@ -387,44 +468,67 @@ async function fetchAll() {
             msg.includes('401') ||
             r.reason?.status === 401
           ) {
-            targets[i].stale = true;
+            acc.stale = true;
           }
         }
-      });
+      }
 
-      const liveIds = new Set(targets.map((a) => a.id));
-      const kept = state.events.filter((e) => !liveIds.has(e.accountId));
-      state.events = [...kept, ...merged];
-      await cacheEvents(state.events);
+      // Rebuild state.events for this month from network + keep other months
+      const other = state.events.filter((e) => e.monthKey && e.monthKey !== mk);
+      const stamped = merged.map((e) => ({ ...e, monthKey: mk }));
+      // Also drop untagged leftovers for live accounts
+      const liveIds = new Set(live.map((a) => a.id));
+      const keptOther = other.filter((e) => !liveIds.has(e.accountId) || e.monthKey);
+      state.events = [...keptOther.filter((e) => e.monthKey !== mk), ...stamped];
+      // If some accounts failed, merge their cache back
+      if (fail) {
+        const cached = await loadMonthEvents(mk);
+        const failedIds = new Set();
+        results.forEach((r, i) => {
+          if (r.status !== 'fulfilled') failedIds.add(live[i].id);
+        });
+        const fromFailed = cached.filter((e) => failedIds.has(e.accountId));
+        const okIds = new Set(stamped.map((e) => e.uid));
+        for (const e of fromFailed) {
+          if (!okIds.has(e.uid)) state.events.push(e);
+        }
+      }
+
       persistAccounts(state);
+      state.fromCache = false;
 
       if (fail && !merged.length) {
         state.lastFetchNote = 'fail';
-        toast(`${fail} アカウントの取得に失敗（コンソールを確認）`, 'error');
+        toast(`${fail} アカウントの取得に失敗`, 'error');
         showBanner('予定の取得に失敗しました。再連携または ↻ を試してください。');
       } else if (!merged.length) {
         const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
         state.lastFetchNote = 'empty';
-        toast(`0 件（カレンダー ${calCount || '?'} 個を走査）`, 'error');
+        toast(`0 件（カレンダー ${calCount || '?'} 個）`, 'error');
         showBanner(
           `取得は成功しましたが <strong>0 件</strong> でした。` +
-            `（走査カレンダー数: ${calCount || '不明'}）` +
-            ` 別月に予定がある・または権限不足の可能性があります。` +
-            ` チップの ▾ → <strong>再連携</strong> で新しいスコープを許可してください。`
+            ` チップの ▾ → <strong>再連携</strong> でスコープを更新してください。`
         );
-        console.info('[calendar] fetch meta', metas);
       } else {
         const calCount = metas.reduce((s, m) => s + (m.calendars || 0), 0);
         state.lastFetchNote = '';
-        toast(`更新 ${merged.length} 件 / カレンダー ${calCount || '?'} 個`, 'ok');
+        toast(
+          hadCache
+            ? `同期 ${merged.length} 件`
+            : `更新 ${merged.length} 件 / カレンダー ${calCount || '?'} 個`,
+          'ok'
+        );
         showBanner('');
-        console.info('[calendar] fetch meta', metas);
       }
 
       paint();
     } catch (err) {
       console.error(err);
-      toast('取得失敗: ' + (err?.message || err), 'error');
+      if (hadCache) {
+        toast('更新失敗 · キャッシュを表示中', 'error');
+      } else {
+        toast('取得失敗: ' + (err?.message || err), 'error');
+      }
     } finally {
       if (mySeq === fetchSeq) setLoading(false);
     }
@@ -500,8 +604,9 @@ async function onCreate(e) {
     setProp('eventStart', 'type', 'datetime-local');
     setProp('eventEnd', 'type', 'datetime-local');
     fillDefaultTimes(state.selectedDate);
+    openComposer(false);
     toast(`作成しました → ${acc.email}`, 'ok');
-    await fetchAll();
+    await fetchAll({ force: true });
   } catch (err) {
     console.error(err);
     toast('作成失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
@@ -547,7 +652,7 @@ async function confirmDelete() {
       recurringEventId: ev.recurringEventId,
     });
     toast(scope === 'all' ? 'シリーズを削除しました' : '削除しました', 'ok');
-    await fetchAll();
+    await fetchAll({ force: true });
   } catch (err) {
     console.error(err);
     toast('削除失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
@@ -574,9 +679,6 @@ async function onEditSave(e) {
   }
 
   const apply = async (scope) => {
-    // Series (master) patch: text fields only — never push this instance's
-    // start/end onto the master DTSTART (Google would shift the whole series).
-    // Single instance: full resource including times.
     const resource = buildEventResource({
       summary,
       description,
@@ -596,12 +698,10 @@ async function onEditSave(e) {
       closeEditModal();
       state.editingEvent = null;
       toast(
-        scope === 'all'
-          ? 'シリーズを更新しました（時刻は各回のまま）'
-          : '更新しました',
+        scope === 'all' ? 'シリーズを更新しました（時刻は各回のまま）' : '更新しました',
         'ok'
       );
-      await fetchAll();
+      await fetchAll({ force: true });
     } catch (err) {
       console.error(err);
       toast('更新失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
@@ -611,11 +711,7 @@ async function onEditSave(e) {
   };
 
   if (ev.isRecurring || ev.recurringEventId) {
-    pendingRecurAction = {
-      type: 'edit',
-      ev,
-      run: apply,
-    };
+    pendingRecurAction = { type: 'edit', ev, run: apply };
     openRecurScopeModal('edit');
     return;
   }
@@ -640,13 +736,11 @@ async function handleDrop(uid, ymd, timeHint) {
     const end = new Date(start.getTime() + dur);
     times = { start: start.toISOString(), end: end.toISOString(), allDay: false };
   } else if (timeHint && ev.allDay) {
-    // dropping all-day onto timed slot → keep all-day on that date
     times = moveEventToDate(ev, ymd);
   } else {
     times = moveEventToDate(ev, ymd);
   }
 
-  // no-op?
   if (times.allDay && times.start === ev.start && times.end === ev.end) return;
   if (!times.allDay && times.start === ev.start && times.end === ev.end) return;
 
@@ -659,7 +753,7 @@ async function handleDrop(uid, ymd, timeHint) {
         recurringEventId: ev.recurringEventId,
       });
       toast('移動しました', 'ok');
-      await fetchAll();
+      await fetchAll({ force: true });
     } catch (err) {
       console.error(err);
       toast('移動失敗: ' + (err?.data?.error?.message || err?.message || err), 'error');
@@ -668,8 +762,6 @@ async function handleDrop(uid, ymd, timeHint) {
     }
   };
 
-  // Recurring: default to THIS instance only. Series-wide time move via drag
-  // would rewrite master DTSTART from one instance — too destructive for DnD.
   if (ev.isRecurring || ev.recurringEventId) {
     pendingRecurAction = {
       type: 'move',
@@ -726,8 +818,37 @@ function on(id, event, fn) {
   if (el) el.addEventListener(event, fn);
 }
 
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  // Only on https or localhost
+  const ok =
+    location.protocol === 'https:' ||
+    location.hostname === 'localhost' ||
+    location.hostname === '127.0.0.1';
+  if (!ok) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((err) => {
+      console.warn('[sw] register failed', err);
+    });
+  });
+}
+
 function wire() {
   renderRecurSelect();
+  registerServiceWorker();
+
+  window.addEventListener('online', () => {
+    state.online = true;
+    updateConnectivityUi();
+    toast('オンラインに復帰', 'ok');
+    if (liveAccounts(state).length) fetchAll({ force: true });
+  });
+  window.addEventListener('offline', () => {
+    state.online = false;
+    updateConnectivityUi();
+    toast('オフライン · キャッシュを使用', 'error');
+    paint();
+  });
 
   on('settingsBtn', 'click', openSettings);
   $('settingsModal')?.addEventListener('click', (ev) => {
@@ -757,7 +878,7 @@ function wire() {
 
   on('authBtn', 'click', addAccount);
   on('addAccountBtn', 'click', addAccount);
-  on('refreshBtn', 'click', fetchAll);
+  on('refreshBtn', 'click', () => fetchAll({ force: true }));
   $('eventList')?.addEventListener('click', (ev) => {
     const t = ev.target;
     if (t && (t.id === 'emptyAuthBtn' || t.closest?.('#emptyAuthBtn'))) addAccount();
@@ -789,10 +910,25 @@ function wire() {
     if (liveAccounts(state).length) await fetchAll();
   });
 
-  // View toggle
   $('viewToggle')?.addEventListener('click', (e) => {
     const btn = e.target.closest?.('[data-view]');
     if (btn) setViewMode(btn.dataset.view);
+  });
+
+  // Mobile bottom nav
+  document.getElementById('bottomNav')?.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('[data-nav-view]');
+    if (btn) setViewMode(btn.dataset.navView);
+    if (e.target.closest?.('#fabAdd')) {
+      fillDefaultTimes(state.selectedDate);
+      openComposer(true);
+      $('eventTitle')?.focus();
+    }
+  });
+
+  on('composerClose', 'click', () => openComposer(false));
+  $('composerSheet')?.addEventListener('click', (e) => {
+    if (e.target === $('composerSheet')) openComposer(false);
   });
 
   on('createForm', 'submit', onCreate);
@@ -804,7 +940,6 @@ function wire() {
     fillDefaultTimes(state.selectedDate);
   });
 
-  // Edit modal
   on('editForm', 'submit', onEditSave);
   on('editCancel', 'click', () => {
     state.editingEvent = null;
@@ -827,7 +962,6 @@ function wire() {
     if (ev) askDelete(ev);
   });
 
-  // Recur scope
   on('recurScopeSingle', 'click', () => resolveRecurScope('single'));
   on('recurScopeAll', 'click', () => resolveRecurScope('all'));
   on('recurScopeCancel', 'click', () => {
@@ -861,6 +995,7 @@ function wire() {
       closeSettings();
       closeEditModal();
       closeRecurScopeModal();
+      openComposer(false);
       $('confirmModal')?.classList.remove('open');
     }
     if (e.key === 'ArrowLeft') $('prevMonthBtn')?.click();
@@ -877,6 +1012,11 @@ async function boot() {
   wire();
   restoreAccounts(state);
 
+  // URL ?view=
+  const params = new URLSearchParams(location.search);
+  const qView = params.get('view');
+  if (qView && Object.values(VIEWS).includes(qView)) state.viewMode = qView;
+
   const now = new Date();
   if (!state.viewYear) {
     state.viewYear = now.getFullYear();
@@ -890,8 +1030,13 @@ async function boot() {
   }
   fillDefaultTimes(state.selectedDate);
 
-  const cached = await loadCachedEvents();
-  if (cached.length) state.events = cached;
+  // Month cache first paint
+  const mk = currentMonthKey();
+  const cached = await loadMonthEvents(mk);
+  if (cached.length) {
+    state.events = cached;
+    state.fromCache = true;
+  }
 
   await loadConfig(state);
   if (!hasValidConfig(state)) {
