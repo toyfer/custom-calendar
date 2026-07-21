@@ -59,4 +59,12 @@ export const RECUR_PRESETS = [
 ];
 
 /** Writable calendar roles for create target */
-export const WRITABLE_ROLES = new Set(['owner', 'writer']);
+export const WRITABLE_ROLES = new Set(['owner', 'writer', 'writerWithoutPrivateAccess']);
+
+/** Roles that can list event details (events.list). freeBusyReader cannot. */
+export const EVENT_READ_ROLES = new Set([
+  'owner',
+  'writer',
+  'writerWithoutPrivateAccess',
+  'reader',
+]);

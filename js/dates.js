@@ -214,7 +214,7 @@ export function moveEventToDate(ev, targetYmd) {
 }
 
 export function isRecurringInstance(ev) {
-  return !!(ev.recurringEventId || (ev.id && String(ev.id).includes('_')));
+  return !!(ev.recurringEventId || ev.isRecurring);
 }
 
 export function minutesFromMidnight(date) {
