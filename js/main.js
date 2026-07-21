@@ -3,7 +3,7 @@
  * Multi-account OVERLAY · month/week/list · drag · multi-calendar create · recurring edit
  */
 
-import { RECUR_PRESETS, VIEWS } from './constants.js';
+import { VIEWS } from './constants.js';
 import { cacheEvents, loadCachedEvents } from './cache.js';
 import {
   addDays,
@@ -574,6 +574,9 @@ async function onEditSave(e) {
   }
 
   const apply = async (scope) => {
+    // Series (master) patch: text fields only — never push this instance's
+    // start/end onto the master DTSTART (Google would shift the whole series).
+    // Single instance: full resource including times.
     const resource = buildEventResource({
       summary,
       description,
@@ -582,8 +585,8 @@ async function onEditSave(e) {
       startLocal,
       endLocal,
       timeZone: tz(),
+      includeTimes: scope !== 'all',
     });
-    // Don't send recurrence on instance patch unless editing master
     setLoading(true, '保存中…');
     try {
       await patchEvent(state, ev.accountId, ev.id, resource, ev.calendarId || 'primary', {
@@ -592,7 +595,12 @@ async function onEditSave(e) {
       });
       closeEditModal();
       state.editingEvent = null;
-      toast(scope === 'all' ? 'シリーズを更新しました' : '更新しました', 'ok');
+      toast(
+        scope === 'all'
+          ? 'シリーズを更新しました（時刻は各回のまま）'
+          : '更新しました',
+        'ok'
+      );
       await fetchAll();
     } catch (err) {
       console.error(err);
@@ -660,8 +668,20 @@ async function handleDrop(uid, ymd, timeHint) {
     }
   };
 
+  // Recurring: default to THIS instance only. Series-wide time move via drag
+  // would rewrite master DTSTART from one instance — too destructive for DnD.
   if (ev.isRecurring || ev.recurringEventId) {
-    pendingRecurAction = { type: 'move', ev, run: doMove };
+    pendingRecurAction = {
+      type: 'move',
+      ev,
+      run: async (scope) => {
+        if (scope === 'all') {
+          toast('ドラッグでのシリーズ全体の移動は未対応です。編集から変更してください', 'error');
+          return;
+        }
+        await doMove('single');
+      },
+    };
     openRecurScopeModal('edit');
     return;
   }
