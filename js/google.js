@@ -1,6 +1,6 @@
 /** Google Identity + Calendar API access (REST; multi-calendar) */
 
-import { DISCOVERY_DOC, SCOPES, WRITABLE_ROLES } from './constants.js';
+import { DISCOVERY_DOC, EVENT_READ_ROLES, SCOPES, WRITABLE_ROLES } from './constants.js';
 import {
   accountById,
   hasValidConfig,
@@ -266,7 +266,7 @@ async function listCalendars(accessToken) {
     const items = data?.items || [];
     if (items.length) {
       return items
-        .filter((c) => c.accessRole && c.accessRole !== 'none')
+        .filter((c) => c.accessRole && EVENT_READ_ROLES.has(c.accessRole))
         .map((c) => ({
           id: c.id,
           summary: c.summary || c.id,
@@ -374,6 +374,14 @@ export async function insertEvent(state, accountId, resource, calendarId = 'prim
   });
 }
 
+/** GET one event (master or instance) */
+export async function getEvent(state, accountId, eventId, calendarId = 'primary') {
+  const accessToken = await getValidToken(state, accountId);
+  const encCal = encodeURIComponent(calendarId || 'primary');
+  const encEv = encodeURIComponent(eventId);
+  return calendarRequest(accessToken, `/calendars/${encCal}/events/${encEv}`);
+}
+
 /**
  * Patch event. For recurring:
  *  - scope 'single': patch this instance id
@@ -425,6 +433,7 @@ export function buildEventResource({
   endLocal,
   rrule,
   timeZone,
+  includeTimes = true,
 }) {
   const resource = {
     summary,
@@ -432,21 +441,25 @@ export function buildEventResource({
     location: location || undefined,
   };
 
-  if (allDay) {
-    const s = startLocal.slice(0, 10);
-    let eDate = endLocal.slice(0, 10);
-    // exclusive end
-    const [y, m, d] = eDate.split('-').map(Number);
-    const ed = new Date(y, m - 1, d);
-    ed.setDate(ed.getDate() + 1);
-    eDate = `${ed.getFullYear()}-${String(ed.getMonth() + 1).padStart(2, '0')}-${String(ed.getDate()).padStart(2, '0')}`;
-    resource.start = { date: s };
-    resource.end = { date: eDate };
-  } else {
-    const start = new Date(startLocal);
-    const end = new Date(endLocal);
-    resource.start = { dateTime: start.toISOString(), timeZone };
-    resource.end = { dateTime: end.toISOString(), timeZone };
+  // When patching a recurring MASTER (series), omit start/end so we do not
+  // rewrite DTSTART from a single instance's wall time.
+  if (includeTimes) {
+    if (allDay) {
+      const s = startLocal.slice(0, 10);
+      let eDate = endLocal.slice(0, 10);
+      // Google all-day end is exclusive
+      const [y, m, d] = eDate.split('-').map(Number);
+      const ed = new Date(y, m - 1, d);
+      ed.setDate(ed.getDate() + 1);
+      eDate = `${ed.getFullYear()}-${String(ed.getMonth() + 1).padStart(2, '0')}-${String(ed.getDate()).padStart(2, '0')}`;
+      resource.start = { date: s };
+      resource.end = { date: eDate };
+    } else {
+      const start = new Date(startLocal);
+      const end = new Date(endLocal);
+      resource.start = { dateTime: start.toISOString(), timeZone };
+      resource.end = { dateTime: end.toISOString(), timeZone };
+    }
   }
 
   if (rrule) {
