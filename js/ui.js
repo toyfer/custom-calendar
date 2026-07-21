@@ -668,7 +668,6 @@ function layoutTimed(events, ymd) {
     .map((ev) => {
       const s = new Date(ev.start);
       const e = new Date(ev.end);
-      // clamp to this day
       const dayStart = parseYmd(ymd);
       const dayEnd = addDays(dayStart, 1);
       const start = s < dayStart ? dayStart : s;
@@ -684,21 +683,37 @@ function layoutTimed(events, ymd) {
     .filter((x) => x.durationMin > 0)
     .sort((a, b) => a.topMin - b.topMin || b.durationMin - a.durationMin);
 
-  // greedy column assign
-  const cols = [];
+  const colEnds = [];
   const placed = [];
   for (const item of items) {
     let colIndex = 0;
-    for (; colIndex < cols.length; colIndex++) {
-      if (cols[colIndex] <= item.topMin) break;
+    for (; colIndex < colEnds.length; colIndex++) {
+      if (colEnds[colIndex] <= item.topMin) break;
     }
-    if (colIndex === cols.length) cols.push(0);
-    cols[colIndex] = item.endMin;
+    if (colIndex === colEnds.length) colEnds.push(0);
+    colEnds[colIndex] = item.endMin;
     placed.push({ ...item, colIndex });
   }
-  // determine colCount per overlapping group — simplify: use max cols
-  const colCount = Math.max(1, cols.length);
-  return placed.map((p) => ({ ...p, colCount }));
+
+  // Connected clusters → per-cluster column count
+  const result = [];
+  let i = 0;
+  while (i < placed.length) {
+    let clusterEnd = placed[i].endMin;
+    let j = i + 1;
+    let maxCol = placed[i].colIndex;
+    while (j < placed.length && placed[j].topMin < clusterEnd) {
+      clusterEnd = Math.max(clusterEnd, placed[j].endMin);
+      maxCol = Math.max(maxCol, placed[j].colIndex);
+      j++;
+    }
+    const colCount = maxCol + 1;
+    for (let k = i; k < j; k++) {
+      result.push({ ...placed[k], colCount });
+    }
+    i = j;
+  }
+  return result;
 }
 
 // ── List view ─────────────────────────────────────────────
@@ -728,13 +743,46 @@ export function renderListView(state, { onSelectDate, onEventClick }) {
     return;
   }
 
-  // group by start day
+  // group by each day the event spans (within month)
   const groups = new Map();
-  for (const ev of events) {
-    const key = ev.allDay ? ev.start.slice(0, 10) : toYmd(new Date(ev.start));
+  const bump = (key, ev) => {
+    if (key < startYmd || key > endYmd) return;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(ev);
+  };
+  for (const ev of events) {
+    if (ev.allDay) {
+      let d = parseYmd((ev.start || '').slice(0, 10));
+      const last = parseYmd((ev.end || ev.start || '').slice(0, 10));
+      while (d <= last) {
+        bump(toYmd(d), ev);
+        d = addDays(d, 1);
+      }
+    } else {
+      let d = new Date(ev.start);
+      const endD = new Date(ev.end);
+      // midnight-exclusive end
+      let endY = toYmd(endD);
+      if (
+        endD.getHours() === 0 &&
+        endD.getMinutes() === 0 &&
+        endD.getSeconds() === 0 &&
+        endY > toYmd(d)
+      ) {
+        const prev = new Date(endD);
+        prev.setDate(prev.getDate() - 1);
+        endY = toYmd(prev);
+      }
+      let cur = parseYmd(toYmd(d));
+      const last = parseYmd(endY);
+      while (cur <= last) {
+        bump(toYmd(cur), ev);
+        cur = addDays(cur, 1);
+      }
+    }
   }
+  // sort within day
+  for (const [, list] of groups) list.sort(compareEvents);
 
   const todayYmd = toYmd(new Date());
   for (const [ymd, list] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -981,8 +1029,6 @@ export function fillEditForm(ev) {
   const scopeRow = $('editRecurScope');
   if (scopeRow) {
     scopeRow.hidden = !ev.isRecurring && !ev.recurringEventId;
-    const single = $('editScopeSingle');
-    if (single) single.checked = true;
   }
   setProp('editMeta', 'textContent', `${ev.accountEmail} · ${ev.calendarName || 'primary'}`);
 }
