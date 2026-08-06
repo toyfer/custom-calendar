@@ -27,21 +27,21 @@
         </button>
       </div>
       <div class="mm-header-right">
-        <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ — タップで切替、長押しでSolo"></div>
-        <div class="status-wrap" aria-live="polite">
+        <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ — タップで切替、長押しでSolo" hidden></div>
+        <div class="status-wrap" aria-live="polite" hidden>
           <span id="statusDot" class="status-dot" aria-label="状態"></span>
           <span id="statusLabel" class="status-label" aria-hidden="true"></span>
         </div>
       </div>
     </div>
-    <div id="monthChips" class="month-chips" aria-label="月ジャンプ — 横にスクロールできます"></div>
+    <div id="monthChips" class="month-chips" aria-label="月ジャンプ — 横にスクロールできます" hidden></div>
   </header>
   <div class="week-header" aria-hidden="true">
     <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span class="sat">土</span>
   </div>
   <main id="monthGrid" class="month-grid" aria-label="月カレンダー — タップで日を選択、長押しで作成"></main>
 </div>
-<section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定" data-detent="peek">
+<section id="dayDrawer" class="day-drawer" aria-label="選択日の予定" data-detent="peek" hidden>
   <div class="drawer-handle" aria-hidden="true" title="ドラッグまたはタップで伸縮"></div>
   <div class="drawer-header">
     <h2 id="drawerDate" class="drawer-date">日付を選択してください</h2>
@@ -57,7 +57,7 @@
   <button id="todayBtn" class="bar-btn today" type="button" aria-label="今日に移動">今日</button>
   <button id="nextBtn" class="bar-btn" type="button" aria-label="次月">›</button>
   <div class="bar-spacer"></div>
-  <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウントフィルタ">◎</button>
+  <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウントフィルタ" hidden>◎</button>
 </nav>
 <button id="fab" class="fab" type="button" aria-label="選択日に予定を作成" hidden>＋</button>
 <div id="offlineHint" class="offline-hint" hidden>オフライン · キャッシュを表示中</div>
