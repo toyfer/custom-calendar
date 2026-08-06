@@ -2,9 +2,9 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
-<title>Custom Calendar</title>
-<meta name="description" content="複数アカウント重ね表示 · 月メイン · 片手操作">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Custom Calendar v2 — 表示に徹する</title>
+<meta name="description" content="複数アカウント重ね表示 · 月メイン · 表示ファースト · 触ってから編集">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C0E14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -27,34 +27,39 @@
         </button>
       </div>
       <div class="mm-header-right">
-        <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ"></div>
-        <span id="statusDot" class="status-dot" aria-label="状態"></span>
+        <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ — タップで切替、長押しでSolo"></div>
+        <div class="status-wrap" aria-live="polite">
+          <span id="statusDot" class="status-dot" aria-label="状態"></span>
+          <span id="statusLabel" class="status-label" aria-hidden="true"></span>
+        </div>
       </div>
     </div>
-    <div id="monthChips" class="month-chips" aria-label="月ジャンプ"></div>
+    <div id="monthChips" class="month-chips" aria-label="月ジャンプ — 横にスクロールできます"></div>
   </header>
   <div class="week-header" aria-hidden="true">
     <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span class="sat">土</span>
   </div>
-  <main id="monthGrid" class="month-grid" aria-label="月カレンダー"></main>
+  <main id="monthGrid" class="month-grid" aria-label="月カレンダー — タップで日を選択、長押しで作成"></main>
 </div>
-<section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定">
-  <div class="drawer-handle" aria-hidden="true"></div>
+<section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定" data-detent="peek">
+  <div class="drawer-handle" aria-hidden="true" title="ドラッグまたはタップで伸縮"></div>
   <div class="drawer-header">
-    <h2 id="drawerDate" class="drawer-date">—</h2>
+    <h2 id="drawerDate" class="drawer-date">日付を選択してください</h2>
     <span id="drawerCount" class="drawer-count">—</span>
+    <button id="drawerExpandBtn" class="icon-btn ghost" type="button" aria-label="広げる" title="広げる">⤢</button>
   </div>
-  <div id="drawerList" class="drawer-list"></div>
+  <div id="drawerList" class="drawer-list" role="list"></div>
   <button id="drawerAddBtn" class="drawer-add" type="button">＋ この日に追加</button>
+  <p id="drawerHint" class="sheet-hint" style="text-align:center; margin:0 16px 8px;">行をタップで詳細・編集 / 長押しスワイプで日移動</p>
 </section>
 <nav class="bottom-bar" aria-label="操作バー">
   <button id="prevBtn" class="bar-btn" type="button" aria-label="前月">‹</button>
-  <button id="todayBtn" class="bar-btn today" type="button" aria-label="今日">今日</button>
+  <button id="todayBtn" class="bar-btn today" type="button" aria-label="今日に移動">今日</button>
   <button id="nextBtn" class="bar-btn" type="button" aria-label="次月">›</button>
   <div class="bar-spacer"></div>
-  <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウント">◎</button>
+  <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウントフィルタ">◎</button>
 </nav>
-<button id="fab" class="fab" type="button" aria-label="予定を作成">＋</button>
+<button id="fab" class="fab" type="button" aria-label="選択日に予定を作成" hidden>＋</button>
 <div id="offlineHint" class="offline-hint" hidden>オフライン · キャッシュを表示中</div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="acctSheet" class="sheet" hidden>
@@ -62,15 +67,15 @@
   <div class="sheet-panel">
     <div class="sheet-handle"></div>
     <h3 class="sheet-title">アカウント</h3>
+    <p class="sheet-hint" style="margin-top:0">タップで表示/非表示 · ダブルタップでSolo表示 · 長押しで色変更</p>
     <div id="acctList" class="acct-list"></div>
     <div class="sheet-actions">
       <button id="addAccountBtn" class="primary" type="button">＋ アカウントを追加</button>
       <button id="openSettingsBtn" class="ghost" type="button">⚙ 設定</button>
     </div>
-    <p class="sheet-hint">タップで表示/非表示 · 色は重ね表示で区別</p>
+    <p class="sheet-hint">色は重ね表示で区別 · 終日は■、通常は●で表現</p>
   </div>
 </div>
-<!-- YM Picker: custom sheet, not <dialog> -->
 <div id="ymSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="ymTitle">
   <div class="sheet-backdrop" data-close-ym></div>
   <div class="sheet-panel">
@@ -79,7 +84,6 @@
     <div id="ymGrid" class="ym-grid"></div>
   </div>
 </div>
-<!-- Composer: custom bottom sheet, not OS dialog -->
 <div id="composerSheet" class="composer-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerTitle">
   <div class="composer-backdrop" data-close-composer></div>
   <div class="composer-panel">
@@ -128,7 +132,6 @@
     </form>
   </div>
 </div>
-<!-- Picker sheets for account / calendar inside composer -->
 <div id="composerAccountSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerAccountSheetTitle">
   <div class="sheet-backdrop" data-close-ca-sheet></div>
   <div class="sheet-panel"><div class="sheet-handle"></div><h3 id="composerAccountSheetTitle" class="sheet-title">アカウントを選択</h3><div id="composerAccountList" class="acct-list"></div></div>
@@ -140,7 +143,7 @@
 <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
   <div class="modal">
     <div class="modal-head"><h3 id="settingsTitle">設定</h3><button type="button" class="icon-btn" data-close-settings aria-label="閉じる">×</button></div>
-    <p class="modal-lead">OAuth 認証情報。localStorage に保存すると config.json より優先されます。</p>
+    <p class="modal-lead">OAuth 認証情報。localStorage に保存すると config.json より優先されます。複数アカウントを使う場合はGoogle Cloud Consoleで全アカウントをTest usersに登録してください。</p>
     <form id="settingsForm" class="form">
       <label>Client ID<input id="cfgClientId" type="text" inputmode="email" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com"></label>
       <label>API Key<input id="cfgApiKey" type="text" autocomplete="off" placeholder="AIza..."></label>
