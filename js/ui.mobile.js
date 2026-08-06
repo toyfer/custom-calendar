@@ -1,4 +1,4 @@
-/** ui.mobile v2 — view-first; drawer only while day selected; reliable event edit */
+/** ui.mobile — reauth UX, delete sheet, theme-aware chrome */
 export const $ = (id) => document.getElementById(id);
 
 export function toast(msg, type = '') {
@@ -7,24 +7,42 @@ export function toast(msg, type = '') {
   t.textContent = msg;
   t.className = 'toast show' + (type ? ' ' + type : '');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+  toast._t = setTimeout(() => t.classList.remove('show'), 2400);
 }
 
-export function setStatusDot(online, fromCache) {
+export function setStatusDot(online, fromCache, { staleCount = 0 } = {}) {
   const wrap = document.querySelector('.status-wrap');
   if (wrap) wrap.hidden = false;
   const d = $('statusDot');
   const l = $('statusLabel');
+  let kind = 'ok';
+  let label = 'オンライン';
+  if (!online) {
+    kind = 'off';
+    label = 'オフライン';
+  } else if (staleCount > 0) {
+    kind = 'stale';
+    label = '要再連携';
+  } else if (fromCache) {
+    kind = 'warn';
+    label = 'キャッシュ';
+  }
   if (d) {
-    d.className = 'status-dot ' + (online ? (fromCache ? 'warn' : 'ok') : 'off');
-    d.setAttribute('aria-label', online ? (fromCache ? 'キャッシュ表示中' : 'オンライン') : 'オフライン');
+    d.className = 'status-dot ' + kind;
+    d.setAttribute('aria-label', label);
   }
   if (l) {
-    l.textContent = online ? (fromCache ? 'キャッシュ' : 'オンライン') : 'オフライン';
+    l.textContent = label;
     l.setAttribute('aria-hidden', 'false');
   }
   const hint = $('offlineHint');
   if (hint) hint.hidden = online;
+  const banner = $('sessionBanner');
+  if (banner) {
+    banner.hidden = !(online && staleCount > 0);
+    const n = $('sessionBannerCount');
+    if (n) n.textContent = String(staleCount);
+  }
 }
 
 export function setChromeVisibility(state) {
@@ -72,7 +90,12 @@ function syncDrawerChrome(state) {
     drawer.style.height = '';
     return;
   }
-  if (!drawer.classList.contains('peek') && !drawer.classList.contains('half') && !drawer.classList.contains('full') && !drawer.classList.contains('collapsed')) {
+  if (
+    !drawer.classList.contains('peek') &&
+    !drawer.classList.contains('half') &&
+    !drawer.classList.contains('full') &&
+    !drawer.classList.contains('collapsed')
+  ) {
     drawer.classList.add('peek');
     drawer.setAttribute('data-detent', 'peek');
   }
@@ -98,7 +121,7 @@ function eventYmd(e) {
   }
 }
 
-export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo }) {
+export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo, onStatusClick }) {
   const label = $('monthLabel');
   if (label) label.textContent = `${state.viewYear}年 ${state.viewMonth + 1}月`;
 
@@ -137,6 +160,7 @@ export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo }) {
     const all = state.accounts || [];
     const vis = all.filter((a) => a.visible !== false);
     const soloId = state.soloAccountId || null;
+    const stale = all.filter((a) => a.stale);
 
     if (!all.length) {
       const empty = document.createElement('span');
@@ -147,10 +171,10 @@ export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo }) {
     } else {
       vis.slice(0, 3).forEach((a) => {
         const el = document.createElement('span');
-        el.className = 'av' + (soloId === a.id ? ' solo' : '');
+        el.className = 'av' + (soloId === a.id ? ' solo' : '') + (a.stale ? ' stale' : '');
         el.style.background = a.color || '#5B6CFF';
         el.textContent = (a.name || a.email || '?')[0].toUpperCase();
-        el.title = a.email + (soloId === a.id ? ' · Solo' : '');
+        el.title = a.email + (a.stale ? ' · 要再連携' : '') + (soloId === a.id ? ' · Solo' : '');
         stack.appendChild(el);
       });
       if (all.length > 3) {
@@ -159,11 +183,11 @@ export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo }) {
         more.textContent = `+${all.length - 3}`;
         stack.appendChild(more);
       }
-      if (all.some((a) => a.visible === false) || soloId) {
+      if (all.some((a) => a.visible === false) || soloId || stale.length) {
         const dot = document.createElement('span');
-        dot.className = 'av hidden-badge';
-        dot.textContent = '·';
-        dot.title = soloId ? 'Solo表示中' : '非表示あり';
+        dot.className = 'av hidden-badge' + (stale.length ? ' stale' : '');
+        dot.textContent = stale.length ? '!' : '·';
+        dot.title = stale.length ? '要再連携' : soloId ? 'Solo表示中' : '非表示あり';
         stack.appendChild(dot);
       }
     }
@@ -195,6 +219,12 @@ export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo }) {
       }
       if ((e.key === 's' || e.key === 'S') && onSolo) onSolo();
     };
+  }
+
+  const statusWrap = document.querySelector('.status-wrap');
+  if (statusWrap && onStatusClick) {
+    statusWrap.style.cursor = 'pointer';
+    statusWrap.onclick = onStatusClick;
   }
 
   const acctBtn = $('acctBtn');
@@ -295,15 +325,12 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
 
     cell.innerHTML = `<span class="dnum">${d}</span><span class="dots">${dotsHtml}</span>`;
 
-    // Single tap: select / toggle off. Double tap (or 2nd quick tap): open first event if any
     cell.addEventListener('click', (e) => {
       if (e.target.closest('[data-more]')) return;
       const now = Date.now();
-      const isDouble =
-        dayTapState.lastYmd === curYmd && now - dayTapState.lastT < 380;
+      const isDouble = dayTapState.lastYmd === curYmd && now - dayTapState.lastT < 380;
       dayTapState.lastYmd = curYmd;
       dayTapState.lastT = now;
-
       if (isDouble && evs.length && typeof onOpenEvent === 'function') {
         onSelectDate(curYmd);
         onOpenEvent(evs[0]);
@@ -322,7 +349,7 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
           if (!moved) {
             onSelectDate(curYmd);
             setDrawerDetent('half');
-            toast('長押し: FABまたは「追加」から作成');
+            toast('長押し: FABから作成');
             try {
               navigator.vibrate?.(10);
             } catch {}
@@ -391,7 +418,6 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
 }
 
 function bindRowActivate(row, activate) {
-  // Mobile-friendly: pointerup without drag = activate (edit)
   let sx = 0;
   let sy = 0;
   let dragging = false;
@@ -420,7 +446,6 @@ function bindRowActivate(row, activate) {
   });
   row.addEventListener('click', (e) => {
     if (e.target.closest('button')) return;
-    // desktop fallback if pointer events missed
     if (!window.PointerEvent) activate();
   });
 }
@@ -462,11 +487,10 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate, onClose }) 
   if (!list) return;
   list.innerHTML = '';
 
-  // Close control in drawer header area via count badge long-press not needed — add close row
   const closeBar = document.createElement('div');
   closeBar.className = 'drawer-close-bar';
   closeBar.innerHTML =
-    '<button type="button" class="sm ghost" id="drawerCloseBtn" style="width:100%;min-height:40px">閉じる（日付の選択を解除）</button>';
+    '<button type="button" class="sm ghost" id="drawerCloseBtn" style="width:100%;min-height:40px">閉じる</button>';
   list.appendChild(closeBar);
   closeBar.querySelector('#drawerCloseBtn').onclick = () => {
     if (onClose) onClose();
@@ -491,7 +515,6 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate, onClose }) 
     row.setAttribute('aria-label', `編集: ${e.summary || '無題'}`);
     row.style.setProperty('--ev', a ? a.color : '#5B6CFF');
 
-    // Desktop drag only — avoid breaking mobile tap
     const canHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
     if (canHover) {
       row.draggable = true;
@@ -516,7 +539,7 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate, onClose }) 
 
     const loc = e.location ? ` · ${e.location}` : '';
     const acctName = a ? a.name || a.email : '';
-    row.innerHTML = `<div class="e-time">${timeLabel}</div><div class="e-main"><div class="e-title"></div><div class="e-meta"></div></div><div class="e-dot" style="background:${a ? a.color : '#5B6CFF'}" title="${acctName}"></div><div class="e-actions"><button type="button" class="sm ghost" data-edit>編集</button><button type="button" class="sm ghost" data-del>削除</button></div>`;
+    row.innerHTML = `<div class="e-time">${timeLabel}</div><div class="e-main"><div class="e-title"></div><div class="e-meta"></div></div><div class="e-dot" style="background:${a ? a.color : '#5B6CFF'}" title="${acctName}"></div><div class="e-actions"><button type="button" class="sm ghost" data-edit>編集</button><button type="button" class="sm danger-soft" data-del>削除</button></div>`;
     row.querySelector('.e-title').textContent = e.summary || '(無題)';
     row.querySelector('.e-meta').textContent = acctName + loc;
 
@@ -543,27 +566,56 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate, onClose }) 
   }
 }
 
-export function renderAcctSheet(state, { onToggle, onSolo }) {
+export function renderAcctSheet(state, { onToggle, onSolo, onReauth }) {
   const list = $('acctList');
   if (!list) return;
   list.innerHTML = '';
 
   if (!state.accounts.length) {
     list.innerHTML =
-      '<div class="empty">まだアカウントがありません。<br>下のボタンから追加してください。<br><small style="display:block;margin-top:8px;color:var(--text-2)">複数アカウント利用時は Google Cloud の Test users に全員を登録してください。</small></div>';
+      '<div class="empty">まだアカウントがありません。<br>下のボタンから追加してください。</div>';
     return;
+  }
+
+  const stale = state.accounts.filter((a) => a.stale);
+  if (stale.length) {
+    const ban = document.createElement('div');
+    ban.className = 'session-card';
+    ban.innerHTML = `<div class="session-card-body"><strong>セッション切れ</strong><p>${stale.length} 件のアカウントで再連携が必要です。トークンはタブを閉じると消えます。</p></div><button type="button" class="primary sm" id="reauthAllBtn">すべて再連携</button>`;
+    list.appendChild(ban);
+    ban.querySelector('#reauthAllBtn').onclick = () => {
+      if (onReauth) onReauth(null); // all
+    };
   }
 
   const solo = state.soloAccountId || null;
   for (const a of state.accounts) {
-    const row = document.createElement('label');
-    row.className = 'acct-row' + (solo === a.id ? ' solo' : '');
-    row.innerHTML = `<span class="av" style="background:${a.color || '#5B6CFF'}">${(a.name || a.email || '?')[0].toUpperCase()}</span><span class="acct-meta"><b></b><small></small></span><input type="checkbox" class="toggle" ${a.visible !== false ? 'checked' : ''}>`;
+    const row = document.createElement('div');
+    row.className = 'acct-row' + (solo === a.id ? ' solo' : '') + (a.stale ? ' stale' : '');
+    row.innerHTML = `
+      <span class="av" style="background:${a.color || '#5B6CFF'}">${(a.name || a.email || '?')[0].toUpperCase()}</span>
+      <span class="acct-meta"><b></b><small></small></span>
+      <label class="toggle-wrap" title="表示"><input type="checkbox" class="toggle" ${a.visible !== false ? 'checked' : ''} aria-label="表示"></label>
+    `;
     row.querySelector('b').textContent =
-      (a.name || a.email || 'account') + (solo === a.id ? ' · Solo' : '');
-    row.querySelector('small').textContent =
-      a.email + (a.stale ? ' · 要再連携' : '') + (solo === a.id ? ' · 表示中' : '');
+      (a.name || a.email || 'account') +
+      (a.stale ? ' · 要再連携' : '') +
+      (solo === a.id ? ' · Solo' : '');
+    row.querySelector('small').textContent = a.email;
     row.querySelector('input').onchange = (e) => onToggle(a.id, e.target.checked);
+
+    if (a.stale) {
+      const re = document.createElement('button');
+      re.type = 'button';
+      re.className = 'reauth-btn';
+      re.textContent = '再連携';
+      re.onclick = (e) => {
+        e.stopPropagation();
+        if (onReauth) onReauth(a.id);
+      };
+      row.appendChild(re);
+    }
+
     row.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (onSolo) onSolo(a.id);
@@ -596,6 +648,53 @@ export function renderAcctSheet(state, { onToggle, onSolo }) {
     btn.onclick = () => onSolo(null);
     list.appendChild(btn);
   }
+}
+
+export function openDeleteSheet(ev, { onConfirm, onCancel }) {
+  const sheet = $('deleteSheet');
+  if (!sheet) return;
+  const title = $('deleteTitle');
+  const meta = $('deleteMeta');
+  const swatch = $('deleteSwatch');
+  if (title) title.textContent = ev.summary || '(無題)';
+  if (meta) {
+    let time = '';
+    try {
+      if (ev.allDay) time = '終日';
+      else {
+        const s = new Date(ev.start);
+        const e = new Date(ev.end);
+        time = `${s.getHours()}:${String(s.getMinutes()).padStart(2, '0')} – ${e.getHours()}:${String(e.getMinutes()).padStart(2, '0')}`;
+      }
+    } catch {
+      time = '';
+    }
+    meta.textContent = [ev.accountEmail || '', time, ev.calendarName || ''].filter(Boolean).join(' · ');
+  }
+  if (swatch) swatch.style.background = ev.color || 'var(--accent)';
+  sheet.hidden = false;
+
+  const ok = $('deleteOk');
+  const cancel = $('deleteCancel');
+  const backdrop = sheet.querySelector('.sheet-backdrop');
+
+  const cleanup = () => {
+    sheet.hidden = true;
+    ok?.removeEventListener('click', onOk);
+    cancel?.removeEventListener('click', onNo);
+    backdrop?.removeEventListener('click', onNo);
+  };
+  const onOk = () => {
+    cleanup();
+    onConfirm?.();
+  };
+  const onNo = () => {
+    cleanup();
+    onCancel?.();
+  };
+  ok?.addEventListener('click', onOk);
+  cancel?.addEventListener('click', onNo);
+  backdrop?.addEventListener('click', onNo);
 }
 
 export function setDrawerDetent(detent) {
@@ -645,8 +744,9 @@ export function renderComposerAccountList(state, onPick) {
     row.type = 'button';
     row.className = 'acct-row';
     row.style.width = '100%';
+    row.disabled = !!a.stale;
     row.innerHTML = `<span class="av" style="background:${a.color || '#5B6CFF'}">${(a.name || a.email || '?')[0].toUpperCase()}</span><span class="acct-meta" style="text-align:left"><b></b><small></small></span>`;
-    row.querySelector('b').textContent = a.name || a.email;
+    row.querySelector('b').textContent = (a.name || a.email) + (a.stale ? ' · 要再連携' : '');
     row.querySelector('small').textContent = a.email;
     row.onclick = () => onPick(a.id);
     list.appendChild(row);
@@ -676,4 +776,12 @@ export function setComposerMode(mode) {
   if (t) t.textContent = mode === 'edit' ? '予定を編集' : '予定を追加';
   const del = $('composerDelete');
   if (del) del.hidden = mode !== 'edit';
+}
+
+export function syncThemeUI(mode) {
+  document.querySelectorAll('[data-theme-option]').forEach((btn) => {
+    const on = btn.getAttribute('data-theme-option') === mode;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
 }
