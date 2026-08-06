@@ -6,8 +6,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0c0e14",
-  "theme_color": "#0f1117",
+  "background_color": "#FFFFFF",
+  "theme_color": "#FFFFFF",
   "lang": "ja",
   "dir": "ltr",
   "categories": ["productivity", "utilities"],
@@ -29,8 +29,8 @@
     {
       "name": "今日",
       "short_name": "今日",
-      "url": "./index.html?view=list",
-      "description": "今日の予定一覧"
+      "url": "./index.html",
+      "description": "今日の月表示を開く"
     }
   ]
 }
