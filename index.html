@@ -3,86 +3,115 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Custom Calendar v2 — 表示に徹する</title>
+<title>Custom Calendar</title>
 <meta name="description" content="複数アカウント重ね表示 · 月メイン · 表示ファースト · 触ってから編集">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C0E14" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Calendar">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="./manifest.webmanifest">
-<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="./icons/icon-light.svg" type="image/svg+xml" media="(prefers-color-scheme: light)">
 <link rel="apple-touch-icon" href="./icons/icon.svg">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <link rel="stylesheet" href="./styles.mobile-month.css">
 </head>
 <body>
+<!-- Layer1: always-visible calendar shell -->
 <div class="mm-app" id="app">
   <header class="mm-header">
     <div class="mm-header-top">
       <div class="mm-header-left">
         <button id="monthLabelBtn" class="month-label-btn" type="button" aria-label="年月を選択">
           <span id="monthLabel" class="month-label">—</span>
-          <span class="month-chevron" aria-hidden="true">▾</span>
+          <span class="month-chevron" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
         </button>
       </div>
       <div class="mm-header-right">
-        <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ — タップで切替、長押しでSolo" hidden></div>
-        <div class="status-wrap" aria-live="polite" hidden>
+        <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ — タップで切替、長押しでSolo"></div>
+        <div class="status-wrap" aria-live="polite">
           <span id="statusDot" class="status-dot" aria-label="状態"></span>
-          <span id="statusLabel" class="status-label" aria-hidden="true"></span>
+          <span id="statusLabel" class="status-label"></span>
         </div>
       </div>
     </div>
-    <div id="monthChips" class="month-chips" aria-label="月ジャンプ — 横にスクロールできます" hidden></div>
+    <div id="monthChips" class="month-chips" aria-label="月ジャンプ — 横にスクロールできます"></div>
   </header>
   <div class="week-header" aria-hidden="true">
-    <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span class="sat">土</span>
+    <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span>
   </div>
-  <main id="monthGrid" class="month-grid" aria-label="月カレンダー — タップで日を選択、長押しで作成"></main>
+  <main id="monthGrid" class="month-grid" aria-label="月カレンダー — タップで日を選択"></main>
 </div>
-<section id="dayDrawer" class="day-drawer" aria-label="選択日の予定" data-detent="peek" hidden>
+
+<!-- Layer2: day details after select -->
+<section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定" data-detent="peek" hidden>
   <div class="drawer-handle" aria-hidden="true" title="ドラッグまたはタップで伸縮"></div>
   <div class="drawer-header">
     <h2 id="drawerDate" class="drawer-date">日付を選択してください</h2>
     <span id="drawerCount" class="drawer-count">—</span>
-    <button id="drawerExpandBtn" class="icon-btn ghost" type="button" aria-label="広げる" title="広げる">⤢</button>
+    <button id="drawerExpandBtn" class="icon-btn ghost" type="button" aria-label="広げる" title="広げる">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 10v4h4M14 8V4h-4M4 14l5-5M14 4l-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
   </div>
   <div id="drawerList" class="drawer-list" role="list"></div>
-  <p id="drawerHint" class="sheet-hint" style="text-align:center; margin:0 16px 10px;">行をタップで詳細・編集</p>
+  <p id="drawerHint" class="sheet-hint drawer-hint" hidden>行をタップで編集 · FABで追加</p>
 </section>
+
 <nav class="bottom-bar" aria-label="操作バー">
-  <button id="prevBtn" class="bar-btn" type="button" aria-label="前月">‹</button>
+  <button id="prevBtn" class="bar-btn" type="button" aria-label="前月">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M12.5 4.5L7 10l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
   <button id="todayBtn" class="bar-btn today" type="button" aria-label="今日に移動">今日</button>
-  <button id="nextBtn" class="bar-btn" type="button" aria-label="次月">›</button>
+  <button id="nextBtn" class="bar-btn" type="button" aria-label="次月">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M7.5 4.5L13 10l-5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
   <div class="bar-spacer"></div>
-  <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウントフィルタ" hidden>◎</button>
+  <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウント">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="7" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M4 16.5c1.2-2.4 3.2-3.6 6-3.6s4.8 1.2 6 3.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+  </button>
 </nav>
-<button id="fab" class="fab" type="button" aria-label="選択日に予定を作成" hidden>＋</button>
+
+<button id="fab" class="fab" type="button" aria-label="選択日に予定を作成" hidden>
+  <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M14 6v16M6 14h16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+</button>
+
 <div id="offlineHint" class="offline-hint" hidden>オフライン · キャッシュを表示中</div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <div id="acctSheet" class="sheet" hidden>
   <div class="sheet-backdrop" data-close-acct></div>
   <div class="sheet-panel">
     <div class="sheet-handle"></div>
     <h3 class="sheet-title">アカウント</h3>
-    <p class="sheet-hint" style="margin-top:0">タップで表示/非表示 · ダブルタップでSolo表示 · 長押しで色変更</p>
+    <p class="sheet-hint sheet-hint-top">タップで表示/非表示 · ダブルタップまたは長押しでSolo</p>
     <div id="acctList" class="acct-list"></div>
     <div class="sheet-actions">
       <button id="addAccountBtn" class="primary" type="button">＋ アカウントを追加</button>
       <button id="openSettingsBtn" class="ghost" type="button">⚙ 設定</button>
     </div>
-    <p class="sheet-hint">色は重ね表示で区別 · 終日は■、通常は●で表現</p>
+    <p class="sheet-hint">色は重ね表示で区別 · 終日は■ · 通常は●</p>
   </div>
 </div>
+
 <div id="ymSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="ymTitle">
   <div class="sheet-backdrop" data-close-ym></div>
   <div class="sheet-panel">
     <div class="sheet-handle"></div>
-    <div class="ym-head"><h3 id="ymTitle">年月を選択</h3><button type="button" class="icon-btn" data-close-ym aria-label="閉じる">×</button></div>
+    <div class="ym-head">
+      <h3 id="ymTitle">年月を選択</h3>
+      <button type="button" class="icon-btn" data-close-ym aria-label="閉じる">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
     <div id="ymGrid" class="ym-grid"></div>
   </div>
 </div>
+
 <div id="composerSheet" class="composer-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerTitle">
   <div class="composer-backdrop" data-close-composer></div>
   <div class="composer-panel">
@@ -98,11 +127,11 @@
       </label>
       <div class="field-row">
         <label class="field">アカウント
-          <button type="button" id="composerAccountBtn" class="select-btn" aria-haspopup="dialog"><span id="composerAccountLabel">選択</span><span aria-hidden="true">▾</span></button>
+          <button type="button" id="composerAccountBtn" class="select-btn" aria-haspopup="dialog"><span id="composerAccountLabel">選択</span><span class="chev" aria-hidden="true">▾</span></button>
           <input type="hidden" id="composerAccount" name="account">
         </label>
         <label class="field">カレンダー
-          <button type="button" id="composerCalendarBtn" class="select-btn" aria-haspopup="dialog"><span id="composerCalendarLabel">primary</span><span aria-hidden="true">▾</span></button>
+          <button type="button" id="composerCalendarBtn" class="select-btn" aria-haspopup="dialog"><span id="composerCalendarLabel">primary</span><span class="chev" aria-hidden="true">▾</span></button>
           <input type="hidden" id="composerCalendar" name="calendar">
         </label>
       </div>
@@ -131,6 +160,7 @@
     </form>
   </div>
 </div>
+
 <div id="composerAccountSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerAccountSheetTitle">
   <div class="sheet-backdrop" data-close-ca-sheet></div>
   <div class="sheet-panel"><div class="sheet-handle"></div><h3 id="composerAccountSheetTitle" class="sheet-title">アカウントを選択</h3><div id="composerAccountList" class="acct-list"></div></div>
@@ -139,24 +169,60 @@
   <div class="sheet-backdrop" data-close-cc-sheet></div>
   <div class="sheet-panel"><div class="sheet-handle"></div><h3 id="composerCalendarSheetTitle" class="sheet-title">カレンダーを選択</h3><div id="composerCalendarList" class="acct-list"></div></div>
 </div>
+
 <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
   <div class="modal">
-    <div class="modal-head"><h3 id="settingsTitle">設定</h3><button type="button" class="icon-btn" data-close-settings aria-label="閉じる">×</button></div>
-    <p class="modal-lead">OAuth 認証情報。localStorage に保存すると config.json より優先されます。複数アカウントを使う場合はGoogle Cloud Consoleで全アカウントをTest usersに登録してください。</p>
+    <div class="modal-head">
+      <h3 id="settingsTitle">設定</h3>
+      <button type="button" class="icon-btn" data-close-settings aria-label="閉じる">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <p class="modal-lead">OAuth 認証情報。localStorage に保存すると config.json より優先されます。複数アカウント利用時は Google Cloud の Test users に全員を登録してください。</p>
     <form id="settingsForm" class="form">
-      <label>Client ID<input id="cfgClientId" type="text" inputmode="email" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com"></label>
-      <label>API Key<input id="cfgApiKey" type="text" autocomplete="off" placeholder="AIza..."></label>
-      <div class="form-actions"><button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button><button class="ghost" type="button" data-close-settings>閉じる</button><button class="primary" type="submit">保存</button></div>
+      <label>Client ID<input id="cfgClientId" type="text" inputmode="email" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com" spellcheck="false"></label>
+      <label>API Key<input id="cfgApiKey" type="text" autocomplete="off" placeholder="AIza..." spellcheck="false"></label>
+      <div class="form-actions">
+        <button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button>
+        <button class="ghost" type="button" data-close-settings>閉じる</button>
+        <button class="primary" type="submit">保存</button>
+      </div>
     </form>
   </div>
 </div>
+
 <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
-  <div class="modal modal-sm"><h3>予定を削除</h3><p id="confirmText" class="modal-lead">この予定を削除しますか？</p><div class="form-actions"><button id="confirmCancel" class="ghost" type="button">キャンセル</button><button id="confirmOk" class="danger" type="button">削除する</button></div></div>
+  <div class="modal modal-sm">
+    <h3>予定を削除</h3>
+    <p id="confirmText" class="modal-lead">この予定を削除しますか？</p>
+    <div class="form-actions">
+      <button id="confirmCancel" class="ghost" type="button">キャンセル</button>
+      <button id="confirmOk" class="danger" type="button">削除する</button>
+    </div>
+  </div>
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ja.js"></script>
 <script type="module" src="./js/main.mobile.js"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="window.__gapiLoaded && window.__gapiLoaded()"></script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="window.__gisLoaded && window.__gisLoaded()"></script>
+<script>
+// PWA SW register (static assets only)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+  });
+}
+// Sync theme-color with color-scheme for installed PWA chrome
+(function () {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  function apply() {
+    document.documentElement.dataset.theme = mq.matches ? 'dark' : 'light';
+  }
+  apply();
+  mq.addEventListener?.('change', apply);
+})();
+</script>
 </body>
 </html>
