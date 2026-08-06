@@ -76,7 +76,6 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
     if (evs.length) {
       const groups = {};
       evs.forEach(e=>{ const k=e.accountId; groups[k]=(groups[k]||0)+1; });
-      // show up to 3 dots with per-account color, prioritize distinct accounts
       const distinct = [];
       const seen=new Set();
       for(const e of evs){ if(!seen.has(e.accountId) && distinct.length<3){ seen.add(e.accountId); distinct.push(e); } }
@@ -85,7 +84,6 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
     }
     cell.innerHTML = `<span class="dnum">${d}</span><span class="dots">${dotsHtml}</span>`;
     cell.onclick = () => onSelectDate(curYmd, null);
-    // view-first: long press 700ms for create hint, not immediate action to reduce errors
     let pressTimer; let moved=false;
     cell.addEventListener('touchstart', () => { moved=false; pressTimer = setTimeout(() => { if(!moved){ onSelectDate(curYmd, null); setDrawerDetent('half'); toast('長押し: この日に作成 — FABまたは「この日に追加」から'); try { navigator.vibrate?.(10); } catch {} } }, 700); }, { passive: true });
     cell.addEventListener('touchmove', ()=>{ moved=true; clearTimeout(pressTimer); });
@@ -94,7 +92,6 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
     cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drop-target'); });
     cell.addEventListener('dragleave', () => cell.classList.remove('drop-target'));
     cell.addEventListener('drop', (e) => { e.preventDefault(); cell.classList.remove('drop-target'); const uid = e.dataTransfer.getData('text/plain'); if (uid) onDrop(uid, curYmd); });
-    // more button handling
     const moreEl = cell.querySelector('[data-more]');
     if (moreEl) {
       moreEl.addEventListener('click', (e)=>{ e.stopPropagation(); onSelectDate(curYmd, null); setDrawerDetent('half'); if(onMoreClick) onMoreClick(curYmd); });
@@ -102,8 +99,7 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
     }
     grid.appendChild(cell);
   }
-  if (!swipeState.bound && typeof onSwipeMonth === 'function') { swipeState.bound = true; grid.addEventListener('touchstart', (e) => { swipeState.sx = e.touches[0].clientX; swipeState.sy = e.touches[0].clientY; }, { passive: true }); grid.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - swipeState.sx; const dy = e.changedTouches[0].clientY - swipeState.sy; if (Math.abs(dx) > 72 && Math.abs(dx) > Math.abs(dy) * 1.4) { const dir = dx < 0 ? 1 : -1; onSwipeMonth(dir); try { navigator.vibrate?.(8); } catch {} // subtle haptic
-      } }, { passive: true }); }
+  if (!swipeState.bound && typeof onSwipeMonth === 'function') { swipeState.bound = true; grid.addEventListener('touchstart', (e) => { swipeState.sx = e.touches[0].clientX; swipeState.sy = e.touches[0].clientY; }, { passive: true }); grid.addEventListener('touchend', (e) => { const dx = e.changedTouches[0].clientX - swipeState.sx; const dy = e.changedTouches[0].clientY - swipeState.sy; if (Math.abs(dx) > 72 && Math.abs(dx) > Math.abs(dy) * 1.4) { const dir = dx < 0 ? 1 : -1; onSwipeMonth(dir); try { navigator.vibrate?.(8); } catch {} } }, { passive: true }); }
 }
 export function renderDayDrawer(state, { onEdit, onDelete, onCreate }) {
   const sel = state.selectedDate || null;
@@ -162,13 +158,12 @@ export function renderAcctSheet(state, { onToggle, onSolo }) {
     list.appendChild(btn);
   }
 }
-export function setDrawerDetent(detent) { const d = $('dayDrawer'); if (!d) return; d.classList.remove('peek','half','full','collapsed'); d.classList.add(detent || 'peek'); d.setAttribute('data-detent', detent||'peek'); d.style.height=''; const fab=$('fab'); if(fab) { /* trigger fab visibility update via event */ window.dispatchEvent(new CustomEvent('drawerDetentChange', {detail:detent})); } }
+export function setDrawerDetent(detent) { const d = $('dayDrawer'); if (!d) return; d.classList.remove('peek','half','full','collapsed'); d.classList.add(detent || 'peek'); d.setAttribute('data-detent', detent||'peek'); d.style.height=''; const fab=$('fab'); if(fab) { window.dispatchEvent(new CustomEvent('drawerDetentChange', {detail:detent})); } }
 export function fillComposerAccountBtn(state, accountId) {
   const btnLabel = $('composerAccountLabel'); const hidden = $('composerAccount');
   const a = state.accounts.find((x) => x.id === accountId) || state.accounts[0];
   if (btnLabel) btnLabel.textContent = a ? `${a.name || a.email} · ${a.email}`.slice(0,40) : '選択';
   if (hidden) hidden.value = accountId || (a ? a.id : '');
-  // update calendar label to reflect account's calendars
   const calId = hidden ? ($('composerCalendar')?.value || 'primary') : 'primary';
   fillComposerCalendarBtn(state, calId);
 }

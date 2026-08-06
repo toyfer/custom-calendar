@@ -1,55 +1,37 @@
-/** main.mobile v2 — calendar-only first paint, progressive disclosure */
+/** main.mobile v2 — view-first, conditional FAB, year-aware chips, solo, a11y, progressive disclosure */
 import { allAccountsFresh, cacheMonthEvents, loadMonthEvents, loadMonthMeta, monthKey } from './cache.js';
 import { clampYmdToMonth, moveEventToDate, parseYmd as parseYmd2, toLocalInputValue, toYmd } from './dates.js';
 import { buildEventResource, buildTimePatch, connectAccount, deleteEvent as apiDeleteEvent, fetchEventsForAccount, initGapiClient, initTokenClient, insertEvent, patchEvent, trySilentRefresh } from './google.js';
 import { accountById, clearConfigLocal, createState, eventByUid, hasValidConfig, isPlaceholder, liveAccounts, loadConfig, persistAccounts, restoreAccounts, saveConfigToLocal } from './state.js';
 import * as ui from './ui.mobile.js';
 const state = createState(); state.online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true; state.fromCache = false; state.soloAccountId = state.soloAccountId || null;
-state._hasInteracted = false;
 let fetchSeq = 0; let fetchInFlight = null; let composerMode = 'create';
 let fpStart = null, fpEnd = null;
 function $(id){ return document.getElementById(id); }
 function tz(){ return Intl.DateTimeFormat().resolvedOptions().timeZone(); }
 function currentMonthKey(){ return monthKey(state.viewYear, state.viewMonth); }
 function updateConnectivity(){ ui.setStatusDot(state.online, !!state.fromCache); document.body.classList.toggle('is-offline', !state.online); }
-function syncChromeVisibility(){
-  const hasAccounts = state.accounts && state.accounts.length>0;
-  const avatarStack=$('avatarStack'); if(avatarStack) avatarStack.hidden = !hasAccounts;
-  const statusWrap=document.querySelector('.status-wrap'); if(statusWrap) statusWrap.hidden = false; // always show status dot for trust
-  const acctBtn=$('acctBtn'); if(acctBtn) acctBtn.hidden = !hasAccounts;
-  // monthChips: keep hidden for minimal initial — show only when user explicitly wants quick jump (handled via ymSheet)
-  const chips=$('monthChips'); if(chips) chips.hidden = true;
-  // drawer: hidden until first interaction
-  const drawer=$('dayDrawer'); if(drawer){
-    const shouldShow = !!state._hasInteracted && !!state.selectedDate;
-    drawer.hidden = !shouldShow;
-    document.querySelector('.mm-app')?.classList.toggle('has-drawer', shouldShow);
-  }
-}
 function paint(){
   updateConnectivity();
-  syncChromeVisibility();
   ui.renderHeader(state, { 
-    onMonthJump:(y,m)=>{ state.viewYear=y; state.viewMonth=m; state.selectedDate=ui.ymd(y,m,1); state._hasInteracted=true; persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }, 
+    onMonthJump:(y,m)=>{ state.viewYear=y; state.viewMonth=m; state.selectedDate=ui.ymd(y,m,1); persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }, 
     onAvatarClick:()=> openAcctSheet(),
     onSolo: (id)=> toggleSolo(id)
   });
   ui.renderMonthGrid(state, { 
     onSelectDate:(ymd,ev)=>{ 
       state.selectedDate=ymd; 
-      state._hasInteracted=true;
       const d=parseYmd2(ymd); 
       if(d.getFullYear()!==state.viewYear||d.getMonth()!==state.viewMonth){ state.viewYear=d.getFullYear(); state.viewMonth=d.getMonth(); } 
       persistAccounts(state); 
       paint(); 
-      // reveal drawer
-      const drawer=$('dayDrawer'); if(drawer){ drawer.hidden=false; document.querySelector('.mm-app')?.classList.add('has-drawer'); ui.setDrawerDetent('peek'); }
+      ui.setDrawerDetent('peek');
       if(ev) openComposer('edit',ev); 
       ui.setFabVisibility(state);
     }, 
     onDrop:(uid,ymd)=> handleDrop(uid,ymd), 
     onSwipeMonth:(dir)=> shift(dir),
-    onMoreClick:(ymd)=>{ state._hasInteracted=true; const drawer=$('dayDrawer'); if(drawer) drawer.hidden=false; ui.setDrawerDetent('half'); }
+    onMoreClick:(ymd)=>{ ui.setDrawerDetent('half'); }
   });
   ui.renderDayDrawer(state, { onEdit:(e)=> openComposer('edit',e), onDelete:(e)=> askDelete(e), onCreate:(ymd)=> openComposer('create',null,ymd) });
   ui.renderAcctSheet(state, { 
@@ -64,7 +46,6 @@ function paint(){
     onSolo:(id)=> toggleSolo(id)
   });
   ui.setFabVisibility(state);
-  syncChromeVisibility();
 }
 function toggleSolo(id){
   const target = id || (state.soloAccountId ? null : (state.accounts.find(a=>a.visible!==false)?.id || null));
@@ -122,7 +103,7 @@ function openComposer(mode, ev=null, ymd=null){
     }, 30);
   } else {
     state.editingEvent=null;
-    const targetYmd= ymd || state.selectedDate || toYmd(new Date()); state.selectedDate=targetYmd; state._hasInteracted=true;
+    const targetYmd= ymd || state.selectedDate || toYmd(new Date()); state.selectedDate=targetYmd;
     const d=parseYmd2(targetYmd); const s=new Date(d); s.setHours(10,0,0,0); const e=new Date(s.getTime()+60*60*1000);
     if(summary) summary.value=''; if(loc) loc.value=''; if(desc) desc.value=''; if(allDay) allDay.checked=false;
     ui.fillComposerAccountBtn(state, accountId); ui.fillComposerCalendarBtn(state, calendarId);
@@ -184,23 +165,23 @@ async function onComposerSave(){
   }catch(err){ console.error(err); const m=err?.data?.error?.message|| err?.message|| String(err); ui.toast('保存失敗: '+m,'error'); const er=$('composerError'); if(er){er.textContent='保存失敗: '+m; er.hidden=false;}}
   finally{ if(saveBtn) saveBtn.disabled=false; }
 }
-function shift(delta){ state.viewMonth+=delta; if(state.viewMonth<0){state.viewMonth=11; state.viewYear-=1;} else if(state.viewMonth>11){state.viewMonth=0; state.viewYear+=1;} state.selectedDate=clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth); state._hasInteracted=true; persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }
-function setViewYearMonth(y,m){ state.viewYear=y; state.viewMonth=m; state.selectedDate=ui.ymd(y,m,1); state._hasInteracted=true; persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }
+function shift(delta){ state.viewMonth+=delta; if(state.viewMonth<0){state.viewMonth=11; state.viewYear-=1;} else if(state.viewMonth>11){state.viewMonth=0; state.viewYear+=1;} state.selectedDate=clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth); persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }
+function setViewYearMonth(y,m){ state.viewYear=y; state.viewMonth=m; state.selectedDate=ui.ymd(y,m,1); persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }
 function maybeEnableAuth(){ if(!state.gapiReady||!state.gisReady) return; if(!hasValidConfig(state)) return; initTokenClient(state); paint(); if(liveAccounts(state).length) fetchAll(); }
 window.__gapiLoaded=()=>{ gapi.load('client', async ()=>{ try{ if(hasValidConfig(state)) await initGapiClient(state); else state.gapiReady=true; maybeEnableAuth(); }catch(err){ console.error(err); state.gapiReady=true; ui.toast('gapi 初期化失敗','error'); }}); };
 window.__gisLoaded=()=>{ state.gisReady=true; maybeEnableAuth(); };
-async function addAccount(){ if(!hasValidConfig(state)){ ui.toast('設定で Client ID / API Key を保存してください','error'); openSettings(); return; } if(!state.tokenClient){ try{initTokenClient(state);}catch(e){ui.toast('認証の初期化に失敗','error'); return;}} try{ const account=await connectAccount(state,{mode:'add'}); ui.toast(`${account.email} を追加`,'ok'); closeAcctSheet(); state._hasInteracted=true; paint(); await fetchAll({force:true}); }catch(err){ const msg=err?.error||err?.message||String(err); ui.toast('連携失敗: '+msg,'error'); }}
+async function addAccount(){ if(!hasValidConfig(state)){ ui.toast('設定で Client ID / API Key を保存してください','error'); openSettings(); return; } if(!state.tokenClient){ try{initTokenClient(state);}catch(e){ui.toast('認証の初期化に失敗','error'); return;}} try{ const account=await connectAccount(state,{mode:'add'}); ui.toast(`${account.email} を追加`,'ok'); closeAcctSheet(); paint(); await fetchAll({force:true}); }catch(err){ const msg=err?.error||err?.message||String(err); ui.toast('連携失敗: '+msg,'error'); }}
 function fetchWindow(){ const start=new Date(state.viewYear, state.viewMonth,1,0,0,0,0); const end=new Date(state.viewYear, state.viewMonth+1,0,23,59,59,999); start.setDate(start.getDate()-1); end.setDate(end.getDate()+1); return {timeMin:start.toISOString(), timeMax:end.toISOString()}; }
 async function applyCachedMonth(mk){ const cached=await loadMonthEvents(mk); if(!cached.length) return false; const other=state.events.filter(e=> e.monthKey && e.monthKey!==mk); state.events=[...other, ...cached]; state.fromCache=true; return true; }
 async function fetchAll(opts={}){ const force=!!opts.force; const mySeq=++fetchSeq; if(fetchInFlight){ try{await fetchInFlight}catch{} if(mySeq!==fetchSeq) return; } const run=(async()=>{ const mk=currentMonthKey(); const targets=liveAccounts(state); const hadCache=await applyCachedMonth(mk); if(hadCache) paint(); if(!targets.length){ paint(); return; } const metaMap=await loadMonthMeta(targets.map(a=>a.id), mk); const fresh=!force && allAccountsFresh(targets.map(a=>a.id), metaMap); if(!state.online){ state.fromCache=hadCache; paint(); ui.toast(hadCache?'オフライン · キャッシュ表示':'オフライン · キャッシュなし', hadCache?'ok':'error'); return; } if(fresh && hadCache){ state.fromCache=true; paint(); return; } for(const a of state.accounts){ const tok=state.tokens[a.id]; if(tok?.accessToken && tok.expiresAt && tok.expiresAt < Date.now()+120000) await trySilentRefresh(state,a.id); } const live=liveAccounts(state); if(!live.length){ paint(); return; } try{ const win=fetchWindow(); const results=await Promise.allSettled(live.map(a=> fetchEventsForAccount(state,a,win))); if(mySeq!==fetchSeq) return; const merged=[]; let fail=0; for(let i=0;i<results.length;i++){ const r=results[i]; const acc=live[i]; if(r.status==='fulfilled'){ const payload=r.value; const events=Array.isArray(payload)?payload:payload.events||[]; merged.push(...events); await cacheMonthEvents(acc.id,mk,events);} else { fail++; console.error(acc.email,r.reason); const msg=String(r.reason?.message||r.reason||''); if(msg.includes('401')|| r.reason?.status===401) acc.stale=true; } } const other=state.events.filter(e=> e.monthKey && e.monthKey!==mk); const stamped=merged.map(e=>({...e,monthKey:mk})); const liveIds=new Set(live.map(a=>a.id)); const keptOther=other.filter(e=> !liveIds.has(e.accountId) || e.monthKey); state.events=[...keptOther.filter(e=> e.monthKey!==mk), ...stamped]; if(fail){ const cached=await loadMonthEvents(mk); const failedIds=new Set(); results.forEach((r,i)=>{ if(r.status!=='fulfilled') failedIds.add(live[i].id); }); const fromFailed=cached.filter(e=> failedIds.has(e.accountId)); const okIds=new Set(stamped.map(e=>e.uid)); for(const e of fromFailed) if(!okIds.has(e.uid)) state.events.push(e); } persistAccounts(state); state.fromCache=false; if(fail && !merged.length) ui.toast(`${fail}アカウント取得失敗`,'error'); else if(!merged.length) ui.toast('0件','error'); else ui.toast(`更新 ${merged.length}件`,'ok'); paint(); }catch(err){ console.error(err); ui.toast('取得失敗','error'); }})(); fetchInFlight=run; try{await run} finally{ if(fetchInFlight===run) fetchInFlight=null; } }
 function askDelete(ev){ state.pendingDelete={ev,scope:'single'}; const t=$('confirmText'); if(t) t.textContent=`「${ev.summary||'無題'}」を削除しますか？`; $('confirmModal')?.classList.add('open'); }
 async function confirmDelete(){ const pending=state.pendingDelete; state.pendingDelete=null; $('confirmModal')?.classList.remove('open'); if(!pending?.ev) return; const {ev,scope}=pending; try{ await apiDeleteEvent(state,ev.accountId,ev.id,ev.calendarId||'primary',{scope:scope||'single', recurringEventId: ev.recurringEventId}); closeComposer(); ui.toast('削除しました','ok'); await fetchAll({force:true}); }catch(err){ ui.toast('削除失敗','error'); } }
 async function handleDrop(uid,ymd){ const ev=eventByUid(state,uid); if(!ev) return; if(accountById(state,ev.accountId)?.stale){ ui.toast('再連携が必要','error'); return; } const times=moveEventToDate(ev,ymd); const resource=buildTimePatch(ev,times,tz()); try{ await patchEvent(state,ev.accountId,ev.id,resource,ev.calendarId||'primary',{scope:'single'}); ui.toast('移動しました','ok'); await fetchAll({force:true}); }catch(err){ ui.toast('移動失敗','error'); } }
-function buildYmPicker(){ const g=$('ymGrid'); if(!g) return; g.innerHTML=''; const base=state.viewYear|| new Date().getFullYear(); for(let y=base-2;y<=base+2;y++){ const h=document.createElement('div'); h.className='ym-year'; h.textContent=y+'年'; g.appendChild(h); for(let m=0;m<12;m++){ const b=document.createElement('button'); b.type='button'; b.textContent=m+1+'月'; if(y===state.viewYear && m===state.viewMonth) b.style.borderColor='var(--accent)'; b.onclick=()=>{ const s=$('ymSheet'); if(s) s.hidden=true; setViewYearMonth(y,m); }; g.appendChild(b); }}}
+function buildYmPicker(){ const g=$('ymGrid'); if(!g) return; g.innerHTML=''; const base=state.viewYear|| new Date().getFullYear(); for(let y=base-2;y<=base+2;y++){ const h=document.createElement('div'); h.className='ym-year'; h.textContent=y+'年'; g.appendChild(h); for(let m=0;m<12;m++){ const b=document.createElement('button'); b.type='button'; b.textContent=m+1+'月'; if(y===state.viewYear && m===state.viewMonth) b.style.borderColor='var(--accent)'; b.onclick=()=>{ $('ymSheet')?.setAttribute('hidden',''); setViewYearMonth(y,m); }; g.appendChild(b); }}}
 function wire(){
   $('prevBtn')?.addEventListener('click', ()=> shift(-1));
   $('nextBtn')?.addEventListener('click', ()=> shift(1));
-  $('todayBtn')?.addEventListener('click', ()=>{ const n=new Date(); state.viewYear=n.getFullYear(); state.viewMonth=n.getMonth(); state.selectedDate=toYmd(n); state._hasInteracted=true; persistAccounts(state); paint(); ui.setFabVisibility(state); if(liveAccounts(state).length) fetchAll(); });
+  $('todayBtn')?.addEventListener('click', ()=>{ const n=new Date(); state.viewYear=n.getFullYear(); state.viewMonth=n.getMonth(); state.selectedDate=toYmd(n); persistAccounts(state); paint(); ui.setFabVisibility(state); if(liveAccounts(state).length) fetchAll(); });
   $('fab')?.addEventListener('click', ()=> openComposer('create',null,state.selectedDate));
   $('drawerAddBtn')?.addEventListener('click', ()=> openComposer('create',null,state.selectedDate));
   $('drawerExpandBtn')?.addEventListener('click', ()=>{
@@ -257,18 +238,12 @@ function wire(){
 }
 async function boot(){
   wire(); restoreAccounts(state);
-  const now=new Date(); if(!state.viewYear){ state.viewYear=now.getFullYear(); state.viewMonth=now.getMonth(); } if(!state.selectedDate) state.selectedDate=toYmd(now);
-  // 初回はカレンダーだけ見せるため、drawerは畳んだまま — 触ってから開く
-  state._hasInteracted = !!state.accounts.length; // アカウントあるなら少しだけ見せる、なければ真っ白なカレンダー
-  state.selectedDate=clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
+  const now=new Date(); if(!state.viewYear){ state.viewYear=now.getFullYear(); state.viewMonth=now.getMonth(); } if(!state.selectedDate) state.selectedDate=toYmd(now); state.selectedDate=clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
   const mk=currentMonthKey(); const cached=await loadMonthEvents(mk); if(cached.length){ state.events=cached; state.fromCache=true; }
   await loadConfig(state); paint();
-  // 初回でdrawerを開くかどうか
-  const drawer=$('dayDrawer'); if(drawer && state._hasInteracted) { drawer.hidden=false; document.querySelector('.mm-app')?.classList.add('has-drawer'); } else if(drawer) { drawer.hidden=true; }
   if(window.gapi && hasValidConfig(state)){ try{ await new Promise(res=>{ if(gapi.client) res(); else gapi.load('client', res);}); await initGapiClient(state);}catch(err){ console.error(err); state.gapiReady=true; }} else state.gapiReady=true;
   if(window.google?.accounts?.oauth2) state.gisReady=true;
   maybeEnableAuth();
   ui.setFabVisibility(state);
-  syncChromeVisibility();
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
