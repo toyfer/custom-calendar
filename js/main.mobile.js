@@ -1,10 +1,10 @@
-/** main.mobile — custom sheets + flatpickr (no OS dialogs) */
+/** main.mobile v2 — view-first, conditional FAB, year-aware chips, solo, a11y, progressive disclosure */
 import { allAccountsFresh, cacheMonthEvents, loadMonthEvents, loadMonthMeta, monthKey } from './cache.js';
 import { clampYmdToMonth, moveEventToDate, parseYmd as parseYmd2, toLocalInputValue, toYmd } from './dates.js';
 import { buildEventResource, buildTimePatch, connectAccount, deleteEvent as apiDeleteEvent, fetchEventsForAccount, initGapiClient, initTokenClient, insertEvent, patchEvent, trySilentRefresh } from './google.js';
 import { accountById, clearConfigLocal, createState, eventByUid, hasValidConfig, isPlaceholder, liveAccounts, loadConfig, persistAccounts, restoreAccounts, saveConfigToLocal } from './state.js';
 import * as ui from './ui.mobile.js';
-const state = createState(); state.online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true; state.fromCache = false;
+const state = createState(); state.online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true; state.fromCache = false; state.soloAccountId = state.soloAccountId || null;
 let fetchSeq = 0; let fetchInFlight = null; let composerMode = 'create';
 let fpStart = null, fpEnd = null;
 function $(id){ return document.getElementById(id); }
@@ -13,16 +13,59 @@ function currentMonthKey(){ return monthKey(state.viewYear, state.viewMonth); }
 function updateConnectivity(){ ui.setStatusDot(state.online, !!state.fromCache); document.body.classList.toggle('is-offline', !state.online); }
 function paint(){
   updateConnectivity();
-  ui.renderHeader(state, { onMonthJump:(y,m)=>{ state.viewYear=y; state.viewMonth=m; state.selectedDate=ui.ymd(y,m,1); persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }, onAvatarClick:()=> openAcctSheet() });
-  ui.renderMonthGrid(state, { onSelectDate:(ymd,ev)=>{ state.selectedDate=ymd; const d=parseYmd2(ymd); if(d.getFullYear()!==state.viewYear||d.getMonth()!==state.viewMonth){ state.viewYear=d.getFullYear(); state.viewMonth=d.getMonth(); } persistAccounts(state); paint(); if(ev) openComposer('edit',ev); else ui.setDrawerDetent('peek'); }, onDrop:(uid,ymd)=> handleDrop(uid,ymd), onSwipeMonth:(dir)=> shift(dir) });
+  ui.renderHeader(state, { 
+    onMonthJump:(y,m)=>{ state.viewYear=y; state.viewMonth=m; state.selectedDate=ui.ymd(y,m,1); persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); }, 
+    onAvatarClick:()=> openAcctSheet(),
+    onSolo: (id)=> toggleSolo(id)
+  });
+  ui.renderMonthGrid(state, { 
+    onSelectDate:(ymd,ev)=>{ 
+      state.selectedDate=ymd; 
+      const d=parseYmd2(ymd); 
+      if(d.getFullYear()!==state.viewYear||d.getMonth()!==state.viewMonth){ state.viewYear=d.getFullYear(); state.viewMonth=d.getMonth(); } 
+      persistAccounts(state); 
+      paint(); 
+      ui.setDrawerDetent('peek');
+      if(ev) openComposer('edit',ev); 
+      ui.setFabVisibility(state);
+    }, 
+    onDrop:(uid,ymd)=> handleDrop(uid,ymd), 
+    onSwipeMonth:(dir)=> shift(dir),
+    onMoreClick:(ymd)=>{ ui.setDrawerDetent('half'); }
+  });
   ui.renderDayDrawer(state, { onEdit:(e)=> openComposer('edit',e), onDelete:(e)=> askDelete(e), onCreate:(ymd)=> openComposer('create',null,ymd) });
-  ui.renderAcctSheet(state, { onToggle:(id,visible)=>{ const a=accountById(state,id); if(!a) return; a.visible=visible; if(!state.accounts.some(x=>x.visible!==false)){ a.visible=true; ui.toast('少なくとも1つは表示が必要'); } persistAccounts(state); paint(); }});
+  ui.renderAcctSheet(state, { 
+    onToggle:(id,visible)=>{ 
+      const a=accountById(state,id); if(!a) return; 
+      if(state.soloAccountId){ state.soloAccountId=null; state.accounts.forEach(x=> x.visible=true); }
+      a.visible=visible; 
+      if(!state.accounts.some(x=>x.visible!==false)){ a.visible=true; ui.toast('少なくとも1つは表示が必要'); } 
+      persistAccounts(state); paint(); 
+      ui.setFabVisibility(state);
+    },
+    onSolo:(id)=> toggleSolo(id)
+  });
+  ui.setFabVisibility(state);
+}
+function toggleSolo(id){
+  const target = id || (state.soloAccountId ? null : (state.accounts.find(a=>a.visible!==false)?.id || null));
+  if(!target || state.soloAccountId===target){
+    state.soloAccountId=null;
+    state.accounts.forEach(a=> a.visible=true);
+    ui.toast('全て表示に戻しました');
+  } else {
+    state.soloAccountId=target;
+    state.accounts.forEach(a=> a.visible = (a.id===target));
+    const acc=accountById(state,target);
+    ui.toast(`${acc?.email||'アカウント'} のみ表示`);
+  }
+  persistAccounts(state);
+  paint();
 }
 function openAcctSheet(){ const s=$('acctSheet'); if(s) s.hidden=false; }
 function closeAcctSheet(){ const s=$('acctSheet'); if(s) s.hidden=true; }
 function openSettings(){ const m=$('settingsModal'); if(!m) return; const cid=$('cfgClientId'); const key=$('cfgApiKey'); if(cid) cid.value=state.clientId||''; if(key) key.value=state.apiKey||''; m.classList.add('open'); }
 function closeSettings(){ $('settingsModal')?.classList.remove('open'); }
-// Composer — custom sheet
 function ensureFlatpickr(){
   const startEl=$('composerStart'); const endEl=$('composerEnd');
   if(!startEl||!endEl) return;
@@ -50,9 +93,7 @@ function openComposer(mode, ev=null, ymd=null){
     state.editingEvent=ev; accountId=ev.accountId; calendarId=ev.calendarId||'primary';
     if(summary) summary.value=ev.summary||''; if(loc) loc.value=ev.location||''; if(desc) desc.value=ev.description||'';
     if(allDay) allDay.checked=!!ev.allDay;
-    // set values after flatpickr init
     ui.fillComposerAccountBtn(state, accountId); ui.fillComposerCalendarBtn(state, calendarId);
-    // ensure pickers then set date
     setTimeout(()=>{
       ensureFlatpickr();
       try{
@@ -68,12 +109,10 @@ function openComposer(mode, ev=null, ymd=null){
     ui.fillComposerAccountBtn(state, accountId); ui.fillComposerCalendarBtn(state, calendarId);
     setTimeout(()=>{ ensureFlatpickr(); try{ if(fpStart) fpStart.setDate(s, true); if(fpEnd) fpEnd.setDate(e, true); }catch{} },30);
   }
-  // also fill hidden values for calendar list
   const accHidden=$('composerAccount'); if(accHidden) accHidden.value=accountId;
   const calHidden=$('composerCalendar'); if(calHidden) calHidden.value=calendarId;
   sheet.hidden=false; document.body.style.overflow='hidden';
   setTimeout(()=> summary?.focus(), 120);
-  // backdrop lock
 }
 function closeComposer(){ const sheet=$('composerSheet'); if(!sheet) return; sheet.hidden=true; document.body.style.overflow=''; state.editingEvent=null; }
 function validateComposer(){
@@ -102,7 +141,6 @@ async function onComposerSave(){
   const sEl=$('composerStart'); const eEl=$('composerEnd');
   if(allDay){ startLocal = sEl.value.slice(0,10); endLocal = eEl.value.slice(0,10); }
   else {
-    // flatpickr date -> toLocalInputValue via ISO
     const sDate = sEl._flatpickr?.selectedDates[0] || new Date(sEl.value);
     const eDate = eEl._flatpickr?.selectedDates[0] || new Date(eEl.value);
     startLocal = toLocalInputValue(sDate);
@@ -139,13 +177,19 @@ async function fetchAll(opts={}){ const force=!!opts.force; const mySeq=++fetchS
 function askDelete(ev){ state.pendingDelete={ev,scope:'single'}; const t=$('confirmText'); if(t) t.textContent=`「${ev.summary||'無題'}」を削除しますか？`; $('confirmModal')?.classList.add('open'); }
 async function confirmDelete(){ const pending=state.pendingDelete; state.pendingDelete=null; $('confirmModal')?.classList.remove('open'); if(!pending?.ev) return; const {ev,scope}=pending; try{ await apiDeleteEvent(state,ev.accountId,ev.id,ev.calendarId||'primary',{scope:scope||'single', recurringEventId: ev.recurringEventId}); closeComposer(); ui.toast('削除しました','ok'); await fetchAll({force:true}); }catch(err){ ui.toast('削除失敗','error'); } }
 async function handleDrop(uid,ymd){ const ev=eventByUid(state,uid); if(!ev) return; if(accountById(state,ev.accountId)?.stale){ ui.toast('再連携が必要','error'); return; } const times=moveEventToDate(ev,ymd); const resource=buildTimePatch(ev,times,tz()); try{ await patchEvent(state,ev.accountId,ev.id,resource,ev.calendarId||'primary',{scope:'single'}); ui.toast('移動しました','ok'); await fetchAll({force:true}); }catch(err){ ui.toast('移動失敗','error'); } }
-function buildYmPicker(){ const g=$('ymGrid'); if(!g) return; g.innerHTML=''; const base=state.viewYear|| new Date().getFullYear(); for(let y=base-2;y<=base+2;y++){ const h=document.createElement('div'); h.className='ym-year'; h.textContent=y+'年'; g.appendChild(h); for(let m=0;m<12;m++){ const b=document.createElement('button'); b.type='button'; b.textContent=m+1+'月'; b.onclick=()=>{ $('ymSheet')?.setAttribute('hidden',''); setViewYearMonth(y,m); }; g.appendChild(b); }}}
+function buildYmPicker(){ const g=$('ymGrid'); if(!g) return; g.innerHTML=''; const base=state.viewYear|| new Date().getFullYear(); for(let y=base-2;y<=base+2;y++){ const h=document.createElement('div'); h.className='ym-year'; h.textContent=y+'年'; g.appendChild(h); for(let m=0;m<12;m++){ const b=document.createElement('button'); b.type='button'; b.textContent=m+1+'月'; if(y===state.viewYear && m===state.viewMonth) b.style.borderColor='var(--accent)'; b.onclick=()=>{ $('ymSheet')?.setAttribute('hidden',''); setViewYearMonth(y,m); }; g.appendChild(b); }}}
 function wire(){
   $('prevBtn')?.addEventListener('click', ()=> shift(-1));
   $('nextBtn')?.addEventListener('click', ()=> shift(1));
-  $('todayBtn')?.addEventListener('click', ()=>{ const n=new Date(); state.viewYear=n.getFullYear(); state.viewMonth=n.getMonth(); state.selectedDate=toYmd(n); persistAccounts(state); paint(); if(liveAccounts(state).length) fetchAll(); });
+  $('todayBtn')?.addEventListener('click', ()=>{ const n=new Date(); state.viewYear=n.getFullYear(); state.viewMonth=n.getMonth(); state.selectedDate=toYmd(n); persistAccounts(state); paint(); ui.setFabVisibility(state); if(liveAccounts(state).length) fetchAll(); });
   $('fab')?.addEventListener('click', ()=> openComposer('create',null,state.selectedDate));
   $('drawerAddBtn')?.addEventListener('click', ()=> openComposer('create',null,state.selectedDate));
+  $('drawerExpandBtn')?.addEventListener('click', ()=>{
+    const d=$('dayDrawer'); const cur=d?.getAttribute('data-detent')||'peek';
+    if(cur==='peek') ui.setDrawerDetent('half'); else if(cur==='half') ui.setDrawerDetent('full'); else ui.setDrawerDetent('peek');
+    ui.setFabVisibility(state);
+    setTimeout(()=> paint(), 50);
+  });
   $('avatarStack')?.addEventListener('click', openAcctSheet);
   $('acctBtn')?.addEventListener('click', openAcctSheet);
   $('acctSheet')?.querySelector('[data-close-acct]')?.addEventListener('click', closeAcctSheet);
@@ -155,17 +199,14 @@ function wire(){
   document.querySelector('[data-close-ym]')?.addEventListener('click', ()=>{ const s=$('ymSheet'); if(s) s.hidden=true; });
   $('ymSheet')?.querySelector('[data-close-ym]')?.addEventListener('click', ()=>{ $('ymSheet').hidden=true; });
   document.querySelector('#ymSheet .sheet-backdrop')?.addEventListener('click', ()=>{ $('ymSheet').hidden=true; });
-  // composer sheet
   $('composerSave')?.addEventListener('click', onComposerSave);
   $('composerAllDay')?.addEventListener('change', syncComposerTypes);
   document.querySelectorAll('[data-close-composer]').forEach(b=> b.addEventListener('click', closeComposer));
   $('composerSheet')?.querySelector('.composer-backdrop')?.addEventListener('click', closeComposer);
   $('composerDelete')?.addEventListener('click', ()=>{ const ev=state.editingEvent; if(ev) askDelete(ev); });
-  // custom account/calendar pickers
   $('composerAccountBtn')?.addEventListener('click', ()=>{
     const list=$('composerAccountList'); const hidden=$('composerAccount');
-    ui.renderComposerAccountList(state, (id)=>{ if(hidden) hidden.value=id; ui.fillComposerAccountBtn(state,id); $('composerAccountSheet').hidden=true; // refresh calendar list
-      const calList=state.calendarsByAccount[id]||[]; const firstCal=calList[0]?.id||'primary'; const calHidden=$('composerCalendar'); if(calHidden) calHidden.value=firstCal; ui.fillComposerCalendarBtn(state, firstCal); });
+    ui.renderComposerAccountList(state, (id)=>{ if(hidden) hidden.value=id; ui.fillComposerAccountBtn(state,id); $('composerAccountSheet').hidden=true; const calList=state.calendarsByAccount[id]||[]; const firstCal=calList[0]?.id||'primary'; const calHidden=$('composerCalendar'); if(calHidden) calHidden.value=firstCal; ui.fillComposerCalendarBtn(state, firstCal); });
     $('composerAccountSheet').hidden=false;
   });
   document.querySelector('[data-close-ca-sheet]')?.addEventListener('click', ()=> $('composerAccountSheet').hidden=true);
@@ -177,15 +218,20 @@ function wire(){
   });
   document.querySelector('[data-close-cc-sheet]')?.addEventListener('click', ()=> $('composerCalendarSheet').hidden=true);
   document.querySelector('#composerCalendarSheet .sheet-backdrop')?.addEventListener('click', ()=> $('composerCalendarSheet').hidden=true);
-  // settings/confirm
   $('settingsModal')?.addEventListener('click', (ev)=>{ if(ev.target===$('settingsModal')||ev.target.hasAttribute?.('data-close-settings')) closeSettings(); });
   $('settingsForm')?.addEventListener('submit', (ev)=>{ ev.preventDefault(); const CLIENT_ID=($('cfgClientId')?.value||'').trim(); const API_KEY=($('cfgApiKey')?.value||'').trim(); if(isPlaceholder(CLIENT_ID)|| isPlaceholder(API_KEY)||!CLIENT_ID||!API_KEY){ ui.toast('有効な Client ID と API Key を入力してください','error'); return; } saveConfigToLocal({CLIENT_ID, API_KEY}); ui.toast('設定を保存しました。再読み込みします','ok'); setTimeout(()=> location.reload(),400); });
   $('clearCfgBtn')?.addEventListener('click', ()=>{ clearConfigLocal(); ui.toast('ローカル設定を削除しました'); setTimeout(()=> location.reload(),400); });
   $('confirmCancel')?.addEventListener('click', ()=>{ state.pendingDelete=null; $('confirmModal')?.classList.remove('open'); });
   $('confirmOk')?.addEventListener('click', confirmDelete);
   $('confirmModal')?.addEventListener('click', (ev)=>{ if(ev.target===$('confirmModal')){ state.pendingDelete=null; $('confirmModal')?.classList.remove('open'); }});
-  // drawer drag
-  const drawer=$('dayDrawer'); let startY=0, startH=0, dragging=false; const handle=drawer?.querySelector('.drawer-handle'); if(handle){ handle.addEventListener('touchstart',(e)=>{ dragging=true; startY=e.touches[0].clientY; startH=drawer.getBoundingClientRect().height; drawer.style.transition='none'; },{passive:true}); window.addEventListener('touchmove',(e)=>{ if(!dragging) return; const dy=startY - e.touches[0].clientY; const maxH=window.innerHeight*0.85; const minH=100; const h=Math.min(maxH, Math.max(minH, startH+dy)); drawer.style.height=h+'px'; },{passive:true}); window.addEventListener('touchend',()=>{ if(!dragging) return; dragging=false; drawer.style.transition=''; const h=drawer.getBoundingClientRect().height; const vh=window.innerHeight; drawer.style.height=''; if(h<vh*0.22) ui.setDrawerDetent('collapsed'); else if(h<vh*0.4) ui.setDrawerDetent('peek'); else if(h<vh*0.65) ui.setDrawerDetent('half'); else ui.setDrawerDetent('full'); },{passive:true}); }
+  const drawer=$('dayDrawer'); let startY=0, startH=0, dragging=false; const handle=drawer?.querySelector('.drawer-handle');
+  if(handle){
+    handle.addEventListener('click', ()=>{ const cur=drawer.getAttribute('data-detent')||'peek'; if(cur==='peek') ui.setDrawerDetent('half'); else if(cur==='half') ui.setDrawerDetent('full'); else ui.setDrawerDetent('peek'); ui.setFabVisibility(state); });
+    handle.addEventListener('touchstart',(e)=>{ dragging=true; startY=e.touches[0].clientY; startH=drawer.getBoundingClientRect().height; drawer.style.transition='none'; },{passive:true});
+    window.addEventListener('touchmove',(e)=>{ if(!dragging) return; const dy=startY - e.touches[0].clientY; const maxH=window.innerHeight*0.85; const minH=100; const h=Math.min(maxH, Math.max(minH, startH+dy)); drawer.style.height=h+'px'; },{passive:true});
+    window.addEventListener('touchend',()=>{ if(!dragging) return; dragging=false; drawer.style.transition=''; const h=drawer.getBoundingClientRect().height; const vh=window.innerHeight; drawer.style.height=''; if(h<vh*0.22) ui.setDrawerDetent('collapsed'); else if(h<vh*0.4) ui.setDrawerDetent('peek'); else if(h<vh*0.65) ui.setDrawerDetent('half'); else ui.setDrawerDetent('full'); ui.setFabVisibility(state); },{passive:true});
+  }
+  window.addEventListener('drawerDetentChange', ()=> ui.setFabVisibility(state));
   window.addEventListener('online', ()=>{ state.online=true; updateConnectivity(); if(liveAccounts(state).length) fetchAll({force:true}); });
   window.addEventListener('offline', ()=>{ state.online=false; updateConnectivity(); paint(); });
   document.addEventListener('keydown', (e)=>{ if(e.key==='Escape'){ closeAcctSheet(); closeSettings(); const cs=$('composerSheet'); if(cs && !cs.hidden) closeComposer(); $('confirmModal')?.classList.remove('open'); const yms=$('ymSheet'); if(yms && !yms.hidden) yms.hidden=true; const ca=$('composerAccountSheet'); if(ca && !ca.hidden) ca.hidden=true; const cc=$('composerCalendarSheet'); if(cc && !cc.hidden) cc.hidden=true; } });
@@ -198,5 +244,6 @@ async function boot(){
   if(window.gapi && hasValidConfig(state)){ try{ await new Promise(res=>{ if(gapi.client) res(); else gapi.load('client', res);}); await initGapiClient(state);}catch(err){ console.error(err); state.gapiReady=true; }} else state.gapiReady=true;
   if(window.google?.accounts?.oauth2) state.gisReady=true;
   maybeEnableAuth();
+  ui.setFabVisibility(state);
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
