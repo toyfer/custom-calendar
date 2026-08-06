@@ -13,6 +13,7 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icons/icon.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 <link rel="stylesheet" href="./styles.mobile-month.css">
 </head>
 <body>
@@ -69,44 +70,46 @@
     <p class="sheet-hint">タップで表示/非表示 · 色は重ね表示で区別</p>
   </div>
 </div>
-<dialog id="ymPicker" class="ym-picker">
-  <div class="ym-head">
-    <h3>年月を選択</h3>
-    <button type="button" class="icon-btn" data-close-ym aria-label="閉じる">×</button>
+<!-- YM Picker: custom sheet, not <dialog> -->
+<div id="ymSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="ymTitle">
+  <div class="sheet-backdrop" data-close-ym></div>
+  <div class="sheet-panel">
+    <div class="sheet-handle"></div>
+    <div class="ym-head"><h3 id="ymTitle">年月を選択</h3><button type="button" class="icon-btn" data-close-ym aria-label="閉じる">×</button></div>
+    <div id="ymGrid" class="ym-grid"></div>
   </div>
-  <div id="ymGrid" class="ym-grid"></div>
-</dialog>
-<!-- Composer: single dialog for create & edit (bottom-sheet on mobile) -->
-<dialog id="composerDialog" class="composer-dialog" aria-labelledby="composerTitle">
-  <form id="composerForm" novalidate>
+</div>
+<!-- Composer: custom bottom sheet, not OS dialog -->
+<div id="composerSheet" class="composer-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerTitle">
+  <div class="composer-backdrop" data-close-composer></div>
+  <div class="composer-panel">
+    <div class="composer-handle"></div>
     <div class="composer-head">
-      <button type="button" class="ghost" data-close-composer aria-label="キャンセル">キャンセル</button>
+      <button type="button" class="ghost" data-close-composer>キャンセル</button>
       <h3 id="composerTitle">予定を追加</h3>
-      <button type="submit" id="composerSave" class="primary">保存</button>
+      <button type="button" id="composerSave" class="primary">保存</button>
     </div>
-    <div class="composer-body">
-      <label class="field" for="composerSummary">タイトル <span aria-hidden="true" class="req">*</span>
+    <form id="composerForm" novalidate class="composer-body">
+      <label class="field" for="composerSummary">タイトル <span class="req">*</span>
         <input id="composerSummary" name="summary" type="text" required maxlength="200" autocomplete="off" enterkeyhint="next" placeholder="例: 打ち合わせ">
-        <span class="field-hint" id="composerSummaryHint"></span>
       </label>
       <div class="field-row">
-        <label class="field" for="composerAccount">アカウント
-          <select id="composerAccount" name="account"></select>
+        <label class="field">アカウント
+          <button type="button" id="composerAccountBtn" class="select-btn" aria-haspopup="dialog"><span id="composerAccountLabel">選択</span><span aria-hidden="true">▾</span></button>
+          <input type="hidden" id="composerAccount" name="account">
         </label>
-        <label class="field" for="composerCalendar">カレンダー
-          <select id="composerCalendar" name="calendar"></select>
+        <label class="field">カレンダー
+          <button type="button" id="composerCalendarBtn" class="select-btn" aria-haspopup="dialog"><span id="composerCalendarLabel">primary</span><span aria-hidden="true">▾</span></button>
+          <input type="hidden" id="composerCalendar" name="calendar">
         </label>
       </div>
-      <label class="check-row" for="composerAllDay">
-        <input id="composerAllDay" name="allDay" type="checkbox">
-        <span>終日</span>
-      </label>
+      <label class="check-row" for="composerAllDay"><input id="composerAllDay" name="allDay" type="checkbox"><span>終日</span></label>
       <div class="field-row">
         <label class="field" for="composerStart">開始 <span class="req">*</span>
-          <input id="composerStart" name="start" type="datetime-local" required>
+          <input id="composerStart" name="start" type="text" required placeholder="タップして選択" readonly inputmode="none">
         </label>
         <label class="field" for="composerEnd">終了 <span class="req">*</span>
-          <input id="composerEnd" name="end" type="datetime-local" required>
+          <input id="composerEnd" name="end" type="text" required placeholder="タップして選択" readonly inputmode="none">
         </label>
       </div>
       <label class="field" for="composerLocation">場所
@@ -121,42 +124,35 @@
         <span class="spacer"></span>
         <button type="button" class="ghost" data-close-composer>閉じる</button>
       </div>
-      <p class="sheet-hint">保存はキーボードの「完了」でもできます。開始＜終了になるように自動補正します。</p>
-    </div>
-  </form>
-</dialog>
+      <p class="sheet-hint">日付は自前カレンダーで選択します。OSのピッカーは使いません。</p>
+    </form>
+  </div>
+</div>
+<!-- Picker sheets for account / calendar inside composer -->
+<div id="composerAccountSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerAccountSheetTitle">
+  <div class="sheet-backdrop" data-close-ca-sheet></div>
+  <div class="sheet-panel"><div class="sheet-handle"></div><h3 id="composerAccountSheetTitle" class="sheet-title">アカウントを選択</h3><div id="composerAccountList" class="acct-list"></div></div>
+</div>
+<div id="composerCalendarSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="composerCalendarSheetTitle">
+  <div class="sheet-backdrop" data-close-cc-sheet></div>
+  <div class="sheet-panel"><div class="sheet-handle"></div><h3 id="composerCalendarSheetTitle" class="sheet-title">カレンダーを選択</h3><div id="composerCalendarList" class="acct-list"></div></div>
+</div>
 <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
   <div class="modal">
-    <div class="modal-head">
-      <h3 id="settingsTitle">設定</h3>
-      <button type="button" class="icon-btn" data-close-settings aria-label="閉じる">×</button>
-    </div>
+    <div class="modal-head"><h3 id="settingsTitle">設定</h3><button type="button" class="icon-btn" data-close-settings aria-label="閉じる">×</button></div>
     <p class="modal-lead">OAuth 認証情報。localStorage に保存すると config.json より優先されます。</p>
     <form id="settingsForm" class="form">
-      <label>Client ID
-        <input id="cfgClientId" type="text" inputmode="email" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com">
-      </label>
-      <label>API Key
-        <input id="cfgApiKey" type="text" autocomplete="off" placeholder="AIza...">
-      </label>
-      <div class="form-actions">
-        <button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button>
-        <button class="ghost" type="button" data-close-settings>閉じる</button>
-        <button class="primary" type="submit">保存</button>
-      </div>
+      <label>Client ID<input id="cfgClientId" type="text" inputmode="email" autocomplete="off" placeholder="xxxx.apps.googleusercontent.com"></label>
+      <label>API Key<input id="cfgApiKey" type="text" autocomplete="off" placeholder="AIza..."></label>
+      <div class="form-actions"><button id="clearCfgBtn" class="danger" type="button">ローカル設定を消す</button><button class="ghost" type="button" data-close-settings>閉じる</button><button class="primary" type="submit">保存</button></div>
     </form>
   </div>
 </div>
 <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
-  <div class="modal modal-sm">
-    <h3>予定を削除</h3>
-    <p id="confirmText" class="modal-lead">この予定を削除しますか？</p>
-    <div class="form-actions">
-      <button id="confirmCancel" class="ghost" type="button">キャンセル</button>
-      <button id="confirmOk" class="danger" type="button">削除する</button>
-    </div>
-  </div>
+  <div class="modal modal-sm"><h3>予定を削除</h3><p id="confirmText" class="modal-lead">この予定を削除しますか？</p><div class="form-actions"><button id="confirmCancel" class="ghost" type="button">キャンセル</button><button id="confirmOk" class="danger" type="button">削除する</button></div></div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ja.js"></script>
 <script type="module" src="./js/main.mobile.js"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="window.__gapiLoaded && window.__gapiLoaded()"></script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="window.__gisLoaded && window.__gisLoaded()"></script>
