@@ -1,5 +1,6 @@
-/* v2 complete: View-First · Display-Focused · Progressive Disclosure */
+/* v2 complete: View-First · Display-Focused · Progressive Disclosure · Theme/SVG */
 :root{
+  color-scheme: light dark;
   --surface:#ffffff;--surface-2:#f4f4f5;--surface-3:#e4e4e7;
   --border:#e4e4e7;--border-soft:#f4f4f5;
   --text-1:#09090b;--text-2:#52525b;--text-3:#71717a;
@@ -26,8 +27,9 @@ html,body{
 }
 button,input,textarea,select{font:inherit;color:inherit}
 button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:none;-webkit-appearance:none}
+button svg,a svg{display:block;flex-shrink:0;pointer-events:none}
 
-/* Layer1: calendar fills screen; drawer space only when has-drawer */
+/* Layer1 */
 .mm-app{
   position:fixed;inset:0;width:100%;height:100%;height:100dvh;max-height:100dvh;
   display:grid;grid-template-rows:auto auto minmax(0,1fr);
@@ -54,7 +56,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
   font-size:22px;font-weight:700;letter-spacing:.01em;line-height:1.15;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis
 }
-.month-chevron{font-size:11px;color:var(--text-2);flex-shrink:0}
+.month-chevron{display:inline-flex;color:var(--text-2);flex-shrink:0}
 
 .month-chips{
   display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
@@ -97,7 +99,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
   font-size:12px;font-weight:600;color:var(--text-2);
   border-bottom:1px solid var(--border-soft);background:var(--surface);z-index:10;flex-shrink:0
 }
-.week-header .sun{color:#ff6b7a}
+.week-header .sun{color:#e11d48}
 .week-header .sat{color:#5b6cff}
 
 .month-grid{
@@ -112,7 +114,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
   -webkit-tap-highlight-color:transparent;touch-action:manipulation
 }
 .day-cell:active{background:var(--surface-2)}
-.day-cell.muted{opacity:.35}
+.day-cell.muted{opacity:.38}
 .day-cell.today .dnum{border:2px solid var(--accent);color:var(--accent);font-weight:700}
 .day-cell.selected{background:var(--accent-soft)}
 .day-cell.selected .dnum{background:var(--accent);color:#fff;border-color:var(--accent)}
@@ -134,7 +136,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
 }
 .more:active{background:var(--surface-2)}
 
-/* Layer2: Day drawer — hidden until selection */
+/* Layer2 */
 .day-drawer{
   position:fixed;left:var(--safe-l);right:var(--safe-r);
   bottom:calc(var(--bar-h) + var(--safe-b));width:auto;margin:0;
@@ -171,6 +173,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
   overscroll-behavior:contain;flex:1;min-height:0;padding:8px 12px;
   display:flex;flex-direction:column;gap:8px
 }
+.drawer-hint{text-align:center;margin:0 16px 10px}
 .e-row{
   display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:8px 10px;
   align-items:center;padding:12px;border-radius:12px;background:var(--surface-2);
@@ -192,10 +195,6 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
 .badge{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:3px 6px;border-radius:999px;display:inline-block}
 .empty{text-align:center;color:var(--text-2);font-size:13px;padding:20px 8px;line-height:1.5}
 .link{background:none;border:none;color:var(--accent);font-weight:600;cursor:pointer;min-height:44px;padding:8px}
-.drawer-add{
-  margin:4px 16px 10px;padding:14px;border-radius:12px;border:1px dashed var(--border);
-  background:var(--surface);color:var(--text-1);font-weight:600;flex-shrink:0;min-height:48px
-}
 
 .bottom-bar{
   position:fixed;left:var(--safe-l);right:var(--safe-r);bottom:0;
@@ -215,19 +214,18 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
 .bar-btn[hidden]{display:none!important}
 .bar-spacer{flex:1}
 
-/* Layer3 entry: FAB only when day selected */
 .fab{
   position:fixed;right:calc(16px + var(--safe-r));
   bottom:calc(var(--bar-h) + var(--safe-b) + 12px);
   width:56px;height:56px;border-radius:999px;
   background:linear-gradient(180deg,#8ea4ff,var(--accent));color:#0b1020;
-  font-size:28px;font-weight:700;border:none;
-  box-shadow:0 8px 24px rgba(91,108,255,.35);z-index:36;
+  border:none;box-shadow:0 8px 24px rgba(91,108,255,.35);z-index:36;
   display:grid;place-items:center;line-height:1;
   transition:transform .2s ease,opacity .2s ease
 }
 .fab[hidden]{display:none!important}
 .fab:active{transform:scale(.96)}
+.fab svg{color:#0b1020}
 
 .sheet{position:fixed;inset:0;z-index:50;display:grid;place-items:end center}
 .sheet[hidden]{display:none!important}
@@ -239,6 +237,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
 }
 .sheet-handle{width:36px;height:4px;border-radius:999px;background:var(--surface-3);margin:4px auto 12px}
 .sheet-title{margin:0 0 12px;font-size:17px;font-weight:700}
+.sheet-hint-top{margin-top:0}
 .acct-list{display:flex;flex-direction:column;gap:8px}
 .acct-row{
   display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);
@@ -261,6 +260,7 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
 .sheet-hint{font-size:11px;color:var(--text-2);margin-top:10px;line-height:1.4}
 
 .ym-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.ym-head h3{margin:0;font-size:17px}
 .ym-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:8px 0}
 .ym-grid .ym-year{grid-column:1/-1;font-size:13px;font-weight:700;color:var(--text-2);margin-top:8px}
 .ym-grid button{
@@ -292,7 +292,6 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
   color:var(--text-1);padding:12px 14px;min-height:48px;font-size:16px
 }
 .form textarea{min-height:88px;resize:vertical}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .check-row{display:flex!important;flex-direction:row!important;align-items:center;gap:10px}
 .check-row input{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
 .form-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:4px}
@@ -307,11 +306,11 @@ button.danger{
 }
 .icon-btn{
   width:36px;height:36px;min-width:36px;border-radius:999px;border:1px solid var(--border);
-  background:var(--surface-2);display:grid;place-items:center;font-size:18px;line-height:1;color:var(--text-1)
+  background:var(--surface-2);display:grid;place-items:center;color:var(--text-1)
 }
 .icon-btn.ghost{background:transparent;border:none}
 
-/* Layer3: Composer */
+/* Layer3 */
 .composer-sheet{position:fixed;inset:0;z-index:60;display:grid;place-items:end center}
 .composer-sheet[hidden]{display:none!important}
 .composer-backdrop{position:absolute;inset:0;background:rgba(5,8,16,.45)}
@@ -342,11 +341,11 @@ button.danger{
   background:var(--surface-2);color:var(--text-1);padding:12px 14px;
   display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:16px
 }
+.select-btn .chev{color:var(--text-3);flex-shrink:0}
 .field textarea{min-height:88px;resize:vertical}
 .field input:focus,.select-btn:focus,.field textarea:focus{
   outline:2px solid var(--accent-ring);outline-offset:1px;border-color:var(--accent)
 }
-.field input:invalid{border-color:rgba(255,107,122,.55)}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width:380px){.field-row{grid-template-columns:1fr}}
 .req{color:var(--danger);font-weight:700}
@@ -376,12 +375,15 @@ button.danger{
 
 .flatpickr-calendar{
   background:var(--surface);border:1px solid var(--border);border-radius:12px;
-  box-shadow:0 12px 32px rgba(0,0,0,.18);font-family:var(--font)
+  box-shadow:0 12px 32px rgba(0,0,0,.18);font-family:var(--font);z-index:80
 }
-.flatpickr-months .flatpickr-month{background:var(--surface)}
-.flatpickr-current-month .cur-month,.flatpickr-current-month .cur-year{font-weight:700}
-.flatpickr-day.selected{background:var(--accent);border-color:var(--accent)}
+.flatpickr-months .flatpickr-month{background:var(--surface);color:var(--text-1)}
+.flatpickr-current-month .cur-month,.flatpickr-current-month .cur-year{font-weight:700;color:var(--text-1)}
+.flatpickr-weekday{color:var(--text-2)}
+.flatpickr-day{color:var(--text-1)}
+.flatpickr-day.selected{background:var(--accent);border-color:var(--accent);color:#fff}
 .flatpickr-day.today{border-color:var(--accent)}
+.flatpickr-day:hover{background:var(--surface-2)}
 .numInputWrapper:hover{background:var(--surface-2)}
 
 @keyframes slideUp{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
