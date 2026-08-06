@@ -1,4 +1,4 @@
-/** main.mobile v2 complete — view-first, conditional FAB, year chips, solo, progressive disclosure */
+/** main.mobile v2 — view-first drawer; reliable edit; toggle day to close */
 import { allAccountsFresh, cacheMonthEvents, loadMonthEvents, loadMonthMeta, monthKey } from './cache.js';
 import { clampYmdToMonth, moveEventToDate, parseYmd as parseYmd2, toLocalInputValue, toYmd } from './dates.js';
 import {
@@ -32,6 +32,8 @@ const state = createState();
 state.online = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
 state.fromCache = false;
 state.soloAccountId = null;
+// Never keep a sticky day selection across sessions (drawer stuck open)
+state.selectedDate = null;
 
 let fetchSeq = 0;
 let fetchInFlight = null;
@@ -53,13 +55,27 @@ function updateConnectivity() {
   document.body.classList.toggle('is-offline', !state.online);
 }
 
-/** Month navigation without forcing day selection (view-first) */
+function clearDaySelection() {
+  state.selectedDate = null;
+  const drawer = $('dayDrawer');
+  if (drawer) {
+    drawer.hidden = true;
+    drawer.classList.remove('peek', 'half', 'full', 'collapsed');
+    drawer.style.height = '';
+    drawer.setAttribute('data-detent', 'peek');
+  }
+  $('app')?.classList.remove('has-drawer');
+  persistAccounts(state);
+  paint();
+}
+
 function jumpMonth(y, m, { selectDay = null } = {}) {
   state.viewYear = y;
   state.viewMonth = m;
   if (selectDay != null) {
     state.selectedDate = ui.ymd(y, m, selectDay);
   } else if (state.selectedDate) {
+    // Keep selection only if still valid; do not force day 1
     state.selectedDate = clampYmdToMonth(state.selectedDate, y, m);
   }
   persistAccounts(state);
@@ -75,7 +91,12 @@ function paint() {
     onSolo: (id) => toggleSolo(id),
   });
   ui.renderMonthGrid(state, {
-    onSelectDate: (ymd, ev) => {
+    onSelectDate: (ymd) => {
+      // Toggle: same day again closes drawer (calendar-only view)
+      if (state.selectedDate === ymd) {
+        clearDaySelection();
+        return;
+      }
       state.selectedDate = ymd;
       const d = parseYmd2(ymd);
       if (d.getFullYear() !== state.viewYear || d.getMonth() !== state.viewMonth) {
@@ -85,8 +106,8 @@ function paint() {
       persistAccounts(state);
       ui.setDrawerDetent('peek');
       paint();
-      if (ev) openComposer('edit', ev);
     },
+    onOpenEvent: (ev) => openComposer('edit', ev),
     onDrop: (uid, ymd) => handleDrop(uid, ymd),
     onSwipeMonth: (dir) => shift(dir),
     onMoreClick: () => ui.setDrawerDetent('half'),
@@ -95,6 +116,7 @@ function paint() {
     onEdit: (e) => openComposer('edit', e),
     onDelete: (e) => askDelete(e),
     onCreate: (ymd) => openComposer('create', null, ymd),
+    onClose: () => clearDaySelection(),
   });
   ui.renderAcctSheet(state, {
     onToggle: (id, visible) => {
@@ -838,8 +860,12 @@ function wire() {
         const h = drawer.getBoundingClientRect().height;
         const vh = window.innerHeight;
         drawer.style.height = '';
-        if (h < vh * 0.22) ui.setDrawerDetent('collapsed');
-        else if (h < vh * 0.4) ui.setDrawerDetent('peek');
+        // Swipe down hard → close drawer entirely
+        if (h < vh * 0.18) {
+          clearDaySelection();
+          return;
+        }
+        if (h < vh * 0.4) ui.setDrawerDetent('peek');
         else if (h < vh * 0.65) ui.setDrawerDetent('half');
         else ui.setDrawerDetent('full');
         ui.setFabVisibility(state);
@@ -865,6 +891,7 @@ function wire() {
       closeSettings();
       const cs = $('composerSheet');
       if (cs && !cs.hidden) closeComposer();
+      else if (state.selectedDate) clearDaySelection();
       $('confirmModal')?.classList.remove('open');
       const yms = $('ymSheet');
       if (yms && !yms.hidden) yms.hidden = true;
@@ -884,14 +911,13 @@ function wire() {
 async function boot() {
   wire();
   restoreAccounts(state);
+  // Force calendar-only first paint — never restore selectedDate from storage
+  state.selectedDate = null;
   const now = new Date();
   if (!state.viewYear) {
     state.viewYear = now.getFullYear();
     state.viewMonth = now.getMonth();
   }
-  // View-first: drawer closed until user taps a day
-  if (!state.selectedDate) state.selectedDate = null;
-  else state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
 
   const mk = currentMonthKey();
   const cached = await loadMonthEvents(mk);
