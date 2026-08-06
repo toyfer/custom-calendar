@@ -32,14 +32,11 @@
     </div>
     <div id="monthChips" class="month-chips" aria-label="月ジャンプ"></div>
   </header>
-
   <div class="week-header" aria-hidden="true">
-    <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span>
+    <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span class="sat">土</span>
   </div>
-
   <main id="monthGrid" class="month-grid" aria-label="月カレンダー"></main>
 </div>
-
 <section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定">
   <div class="drawer-handle" aria-hidden="true"></div>
   <div class="drawer-header">
@@ -49,7 +46,6 @@
   <div id="drawerList" class="drawer-list"></div>
   <button id="drawerAddBtn" class="drawer-add" type="button">＋ この日に追加</button>
 </section>
-
 <nav class="bottom-bar" aria-label="操作バー">
   <button id="prevBtn" class="bar-btn" type="button" aria-label="前月">‹</button>
   <button id="todayBtn" class="bar-btn today" type="button" aria-label="今日">今日</button>
@@ -57,11 +53,9 @@
   <div class="bar-spacer"></div>
   <button id="acctBtn" class="bar-btn ghost" type="button" aria-label="アカウント">◎</button>
 </nav>
-
 <button id="fab" class="fab" type="button" aria-label="予定を作成">＋</button>
 <div id="offlineHint" class="offline-hint" hidden>オフライン · キャッシュを表示中</div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
 <div id="acctSheet" class="sheet" hidden>
   <div class="sheet-backdrop" data-close-acct></div>
   <div class="sheet-panel">
@@ -75,7 +69,6 @@
     <p class="sheet-hint">タップで表示/非表示 · 色は重ね表示で区別</p>
   </div>
 </div>
-
 <dialog id="ymPicker" class="ym-picker">
   <div class="ym-head">
     <h3>年月を選択</h3>
@@ -83,7 +76,55 @@
   </div>
   <div id="ymGrid" class="ym-grid"></div>
 </dialog>
-
+<!-- Composer: single dialog for create & edit (bottom-sheet on mobile) -->
+<dialog id="composerDialog" class="composer-dialog" aria-labelledby="composerTitle">
+  <form id="composerForm" novalidate>
+    <div class="composer-head">
+      <button type="button" class="ghost" data-close-composer aria-label="キャンセル">キャンセル</button>
+      <h3 id="composerTitle">予定を追加</h3>
+      <button type="submit" id="composerSave" class="primary">保存</button>
+    </div>
+    <div class="composer-body">
+      <label class="field" for="composerSummary">タイトル <span aria-hidden="true" class="req">*</span>
+        <input id="composerSummary" name="summary" type="text" required maxlength="200" autocomplete="off" enterkeyhint="next" placeholder="例: 打ち合わせ">
+        <span class="field-hint" id="composerSummaryHint"></span>
+      </label>
+      <div class="field-row">
+        <label class="field" for="composerAccount">アカウント
+          <select id="composerAccount" name="account"></select>
+        </label>
+        <label class="field" for="composerCalendar">カレンダー
+          <select id="composerCalendar" name="calendar"></select>
+        </label>
+      </div>
+      <label class="check-row" for="composerAllDay">
+        <input id="composerAllDay" name="allDay" type="checkbox">
+        <span>終日</span>
+      </label>
+      <div class="field-row">
+        <label class="field" for="composerStart">開始 <span class="req">*</span>
+          <input id="composerStart" name="start" type="datetime-local" required>
+        </label>
+        <label class="field" for="composerEnd">終了 <span class="req">*</span>
+          <input id="composerEnd" name="end" type="datetime-local" required>
+        </label>
+      </div>
+      <label class="field" for="composerLocation">場所
+        <input id="composerLocation" name="location" type="text" autocomplete="off" enterkeyhint="next" placeholder="任意">
+      </label>
+      <label class="field" for="composerDesc">メモ
+        <textarea id="composerDesc" name="description" rows="3" placeholder="任意" enterkeyhint="done"></textarea>
+      </label>
+      <p id="composerError" class="form-error" role="alert" hidden></p>
+      <div class="composer-foot-actions">
+        <button type="button" id="composerDelete" class="danger" hidden>削除</button>
+        <span class="spacer"></span>
+        <button type="button" class="ghost" data-close-composer>閉じる</button>
+      </div>
+      <p class="sheet-hint">保存はキーボードの「完了」でもできます。開始＜終了になるように自動補正します。</p>
+    </div>
+  </form>
+</dialog>
 <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
   <div class="modal">
     <div class="modal-head">
@@ -106,45 +147,6 @@
     </form>
   </div>
 </div>
-
-<div id="editModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="editTitleLabel">
-  <div class="modal">
-    <div class="modal-head">
-      <h3 id="editTitleLabel">予定を編集</h3>
-      <button type="button" class="icon-btn" data-close-edit aria-label="閉じる">×</button>
-    </div>
-    <p id="editMeta" class="modal-lead"></p>
-    <form id="editForm" class="form">
-      <label>タイトル
-        <input id="editTitle" type="text" required autocomplete="off">
-      </label>
-      <div class="form-row">
-        <label>開始
-          <input id="editStart" type="datetime-local" required>
-        </label>
-        <label>終了
-          <input id="editEnd" type="datetime-local" required>
-        </label>
-      </div>
-      <label class="check-row">
-        <input id="editAllDay" type="checkbox">
-        <span>終日</span>
-      </label>
-      <label>場所
-        <input id="editLocation" type="text" autocomplete="off">
-      </label>
-      <label>メモ
-        <textarea id="editDesc"></textarea>
-      </label>
-      <div class="form-actions">
-        <button id="editDelete" class="danger" type="button">削除</button>
-        <button id="editCancel" class="ghost" type="button">キャンセル</button>
-        <button class="primary" type="submit">保存</button>
-      </div>
-    </form>
-  </div>
-</div>
-
 <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true">
   <div class="modal modal-sm">
     <h3>予定を削除</h3>
@@ -155,7 +157,6 @@
     </div>
   </div>
 </div>
-
 <script type="module" src="./js/main.mobile.js"></script>
 <script async defer src="https://apis.google.com/js/api.js" onload="window.__gapiLoaded && window.__gapiLoaded()"></script>
 <script async defer src="https://accounts.google.com/gsi/client" onload="window.__gisLoaded && window.__gisLoaded()"></script>
