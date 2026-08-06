@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Custom Calendar — Month First (Mobile)</title>
+<meta name="description" content="複数アカウント重ね表示 · 月メイン · 片手操作">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C0E14" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./styles.mobile-month.css">
+</head>
+<body>
+<div class="mm-app" id="app">
+  <!-- Header: Large month label + avatar stack -->
+  <header class="mm-header">
+    <div class="mm-header-left">
+      <button id="monthLabelBtn" class="month-label-btn" aria-label="年月を選択">
+        <span id="monthLabel" class="month-label">2026年 8月</span>
+        <span class="month-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div id="monthChips" class="month-chips" aria-label="月ジャンプ">
+        <!-- JSで 6ヶ月分のチップを横スクロールで生成 -->
+      </div>
+    </div>
+    <div class="mm-header-right">
+      <div id="avatarStack" class="avatar-stack" role="button" tabindex="0" aria-label="アカウントフィルタ">
+        <!-- JSで生成: ●●●+N -->
+      </div>
+      <span id="statusDot" class="status-dot ok" aria-label="オンライン"></span>
+    </div>
+  </header>
+
+  <!-- Week header sticky -->
+  <div class="week-header" aria-hidden="true">
+    <span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span>
+  </div>
+
+  <!-- Month Grid -->
+  <main id="monthGrid" class="month-grid" aria-label="月カレンダー"></main>
+
+  <!-- Day Drawer (bottom sheet) -->
+  <section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定">
+    <div class="drawer-handle" aria-hidden="true"></div>
+    <div class="drawer-header">
+      <h2 id="drawerDate" class="drawer-date">8月6日 木曜日</h2>
+      <span id="drawerCount" class="drawer-count">3件</span>
+      <button id="drawerClose" class="icon-btn sm ghost" aria-label="閉じる">×</button>
+    </div>
+    <div id="drawerList" class="drawer-list">
+      <!-- JSで予定行を生成 -->
+    </div>
+    <button id="drawerAddBtn" class="drawer-add" type="button">＋ この日に追加</button>
+  </section>
+
+  <!-- Bottom Bar (thumb zone) -->
+  <nav class="bottom-bar" aria-label="操作バー">
+    <button id="prevBtn" class="bar-btn" aria-label="前月">‹</button>
+    <button id="todayBtn" class="bar-btn today" aria-label="今日">今日</button>
+    <button id="nextBtn" class="bar-btn" aria-label="次月">›</button>
+    <div class="bar-spacer"></div>
+    <button id="acctBtn" class="bar-btn ghost" aria-label="アカウント">◎</button>
+  </nav>
+
+  <button id="fab" class="fab" aria-label="予定を作成">＋</button>
+  <div id="offlineHint" class="offline-hint" hidden>オフライン · キャッシュを表示中</div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</div>
+
+<!-- Account Filter Sheet -->
+<div id="acctSheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close-acct></div>
+  <div class="sheet-panel">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">アカウント</h3>
+    <div id="acctList" class="acct-list"></div>
+    <p class="sheet-hint">タップで表示/非表示 · 色はアカウントごとに重ね表示されます</p>
+  </div>
+</div>
+
+<!-- Year/Month Picker Dialog -->
+<dialog id="ymPicker" class="ym-picker">
+  <div class="ym-head">
+    <h3>年月を選択</h3>
+    <button class="icon-btn" onclick="this.closest('dialog').close()" aria-label="閉じる">×</button>
+  </div>
+  <div id="ymGrid" class="ym-grid"></div>
+</dialog>
+
+<script type="module">
+// Prototype JS — month-first with dot indicators, no backend yet
+const ACCOUNTS = [
+  {id:'a1', email:'toyfer@gmail.com', color:'#5B6CFF', visible:true, name:'toy'},
+  {id:'a2', email:'work@example.com', color:'#3DD68C', visible:true, name:'work'},
+  {id:'a3', email:'private@example.com', color:'#FFB86B', visible:false, name:'private'},
+];
+const MOCK_EVENTS = [
+  // ymd, summary, time, accountId, allDay
+  {ymd:'2026-08-06', summary:'朝会', time:'10:00', accountId:'a1'},
+  {ymd:'2026-08-06', summary:'ランチ MTG', time:'12:30', accountId:'a2'},
+  {ymd:'2026-08-06', summary:'歯医者', time:'16:00', accountId:'a1'},
+  {ymd:'2026-08-07', summary:'終日: 有給', allDay:true, accountId:'a3'},
+  {ymd:'2026-08-09', summary:'Custom Calendar設計', time:'14:00', accountId:'a1'},
+  {ymd:'2026-08-09', summary:'レビュー', time:'16:00', accountId:'a2'},
+  {ymd:'2026-08-12', summary:'リリース', time:'10:00', accountId:'a1'},
+  {ymd:'2026-08-15', summary:'家族旅行', allDay:true, accountId:'a3'},
+  {ymd:'2026-08-19', summary:'1on1', time:'15:00', accountId:'a2'},
+  {ymd:'2026-08-22', summary:'登壇', time:'13:00', accountId:'a1'},
+  {ymd:'2026-08-28', summary:'締切', allDay:true, accountId:'a2'},
+];
+let viewYear=2026, viewMonth=7; // 0-indexed 7=Aug
+let selectedYmd='2026-08-06';
+const $ = s=>document.getElementById(s);
+const ymd = (y,m,d)=> `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const parseYmd = s=>{const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d)};
+function eventsForDay(ymd){ return MOCK_EVENTS.filter(e=>e.ymd===ymd && ACCOUNTS.find(a=>a.id===e.accountId)?.visible)}
+function renderHeader(){
+  $('monthLabel').textContent = `${viewYear}年 ${viewMonth+1}月`;
+  // month chips: -2 to +3
+  const chips = $('monthChips'); chips.innerHTML='';
+  for(let d=-2; d<=3; d++){
+    let m=viewMonth+d, y=viewYear;
+    while(m<0){m+=12; y--} while(m>=12){m-=12; y++}
+    const btn=document.createElement('button');
+    btn.className='m-chip'+(d===0?' active':'');
+    btn.textContent=`${m+1}月`;
+    btn.onclick=()=>{viewYear=y; viewMonth=m; selectedYmd=ymd(y,m,1); renderAll()};
+    chips.appendChild(btn);
+  }
+  // avatar stack
+  const stack=$('avatarStack'); stack.innerHTML='';
+  const vis=ACCOUNTS.filter(a=>a.visible), hid=ACCOUNTS.filter(a=>!a.visible);
+  vis.slice(0,3).forEach(a=>{
+    const el=document.createElement('span'); el.className='av'; el.style.background=a.color; el.textContent=a.name[0].toUpperCase(); stack.appendChild(el);
+  });
+  if(ACCOUNTS.length>3){ const more=document.createElement('span'); more.className='av more'; more.textContent=`+${ACCOUNTS.length-3}`; stack.appendChild(more);}
+  if(hid.length){ const dot=document.createElement('span'); dot.className='av hidden-badge'; dot.textContent='·'; stack.appendChild(dot);}
+}
+function renderGrid(){
+  const grid=$('monthGrid'); grid.innerHTML='';
+  const first=new Date(viewYear, viewMonth,1);
+  const startDay=first.getDay(); // 0 Sun
+  const daysInMonth=new Date(viewYear, viewMonth+1,0).getDate();
+  const daysInPrev=new Date(viewYear, viewMonth,0).getDate();
+  const today=new Date(); const todayYmd=ymd(today.getFullYear(), today.getMonth(), today.getDate());
+  for(let i=0;i<42;i++){
+    let y=viewYear, m=viewMonth, d=i-startDay+1, muted=false;
+    if(d<1){ m--; if(m<0){m=11; y--} d=daysInPrev+d; muted=true;}
+    else if(d>daysInMonth){ d=d-daysInMonth; m++; if(m>11){m=0; y++} muted=true;}
+    const curYmd=ymd(y,m,d);
+    const evs=eventsForDay(curYmd);
+    const cell=document.createElement('button');
+    cell.className='day-cell';
+    if(muted) cell.classList.add('muted');
+    if(curYmd===todayYmd) cell.classList.add('today');
+    if(curYmd===selectedYmd) cell.classList.add('selected');
+    cell.setAttribute('aria-label', `${curYmd} ${evs.length}件`);
+    cell.innerHTML=`<span class="dnum">${d}</span><span class="dots">${evs.slice(0,4).map(e=>{
+      const a=ACCOUNTS.find(x=>x.id===e.accountId); const color=a?a.color:'#5B6CFF';
+      return `<i class="dot ${e.allDay?'allday':''}" style="--c:${color}"></i>`
+    }).join('')}${evs.length>4?`<span class="more">+${evs.length-4}</span>`:''}</span>`;
+    cell.onclick=()=>{selectedYmd=curYmd; renderAll(); $('dayDrawer').classList.remove('collapsed');};
+    // long-press to create
+    let pressTimer;
+    cell.addEventListener('touchstart',()=>{pressTimer=setTimeout(()=>{selectedYmd=curYmd; renderDrawer(); toast('長押し: この日に作成'); navigator.vibrate&&navigator.vibrate(10)},400)},{passive:true});
+    cell.addEventListener('touchend',()=>clearTimeout(pressTimer));
+    cell.addEventListener('touchmove',()=>clearTimeout(pressTimer));
+    grid.appendChild(cell);
+  }
+  // swipe
+  let sx=0;
+  grid.addEventListener('touchstart',e=>sx=e.touches[0].clientX,{passive:true});
+  grid.addEventListener('touchend',e=>{
+    const dx=e.changedTouches[0].clientX - sx;
+    if(Math.abs(dx)>60){ if(dx<0) shift(1); else shift(-1); navigator.vibrate&&navigator.vibrate(8)}
+  },{passive:true});
+}
+function renderDrawer(){
+  const d=parseYmd(selectedYmd);
+  const w=['日','月','火','水','木','金','土'][d.getDay()];
+  $('drawerDate').textContent=`${d.getMonth()+1}月${d.getDate()}日 ${w}曜日`;
+  const evs=eventsForDay(selectedYmd);
+  $('drawerCount').textContent=`${evs.length}件`;
+  const list=$('drawerList'); list.innerHTML='';
+  if(!evs.length){ list.innerHTML=`<div class="empty">予定なし — <button class="link" onclick="document.getElementById('fab').click()">タップして追加</button></div>`; return;}
+  evs.forEach(e=>{
+    const a=ACCOUNTS.find(x=>x.id===e.accountId);
+    const row=document.createElement('div'); row.className='e-row';
+    row.style.setProperty('--ev', a?a.color:'#5B6CFF');
+    row.innerHTML=`<div class="e-time">${e.allDay?'<span class="badge">終日</span>':e.time}</div><div class="e-main"><div class="e-title">${e.summary}</div><div class="e-meta">${a?a.email:''}${e.allDay?' · 終日':''}</div></div><div class="e-dot" style="background:${a?a.color:'#5B6CFF'}"></div>`;
+    row.onclick=()=>toast(`編集: ${e.summary}`);
+    list.appendChild(row);
+  });
+}
+function renderAcctSheet(){
+  const list=$('acctList'); list.innerHTML='';
+  ACCOUNTS.forEach(a=>{
+    const row=document.createElement('label'); row.className='acct-row';
+    row.innerHTML=`<span class="av" style="background:${a.color}">${a.name[0].toUpperCase()}</span><span class="acct-meta"><b>${a.name}</b><small>${a.email}</small></span><input type="checkbox" ${a.visible?'checked':''} class="toggle">`;
+    row.querySelector('input').onchange=(e)=>{a.visible=e.target.checked; if(!ACCOUNTS.some(x=>x.visible)){a.visible=true; e.target.checked=true; toast('少なくとも1つは表示が必要')} renderAll()};
+    list.appendChild(row);
+  });
+}
+function renderAll(){ renderHeader(); renderGrid(); renderDrawer(); renderAcctSheet();}
+function shift(delta){ viewMonth+=delta; if(viewMonth<0){viewMonth=11; viewYear--} if(viewMonth>11){viewMonth=0; viewYear++} selectedYmd=ymd(viewYear, viewMonth,1); renderAll();}
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800);}
+$('prevBtn').onclick=()=>shift(-1);
+$('nextBtn').onclick=()=>shift(1);
+$('todayBtn').onclick=()=>{const n=new Date(); viewYear=n.getFullYear(); viewMonth=n.getMonth(); selectedYmd=ymd(viewYear,viewMonth,n.getDate()); renderAll()};
+$('fab').onclick=()=>{ toast('作成シート: '+selectedYmd); $('dayDrawer').classList.add('peek');};
+$('drawerAddBtn').onclick=()=>$('fab').click();
+$('avatarStack').onclick=()=>{ $('acctSheet').hidden=false; };
+$('acctBtn').onclick=()=>{ $('acctSheet').hidden=false; };
+$('acctSheet').querySelector('[data-close-acct]').onclick=()=>{$('acctSheet').hidden=true};
+$('monthLabelBtn').onclick=()=>{$('ymPicker').showModal()};
+// YM picker
+(function(){
+  const g=$('ymGrid'); for(let y=viewYear-2;y<=viewYear+2;y++){
+    const h=document.createElement('div'); h.className='ym-year'; h.textContent=y+'年'; g.appendChild(h);
+    for(let m=0;m<12;m++){
+      const b=document.createElement('button'); b.textContent=(m+1)+'月'; b.onclick=()=>{viewYear=y; viewMonth=m; selectedYmd=ymd(y,m,1); $('ymPicker').close(); renderAll()}; g.appendChild(b);
+    }
+  }
+})();
+// drawer drag
+(function(){
+  const drawer=$('dayDrawer'); let startY=0, startH=0;
+  drawer.querySelector('.drawer-handle').addEventListener('touchstart',e=>{startY=e.touches[0].clientY; startH=drawer.getBoundingClientRect().height; drawer.style.transition='none'},{passive:true});
+  window.addEventListener('touchmove',e=>{
+    if(!startY) return;
+    const dy=startY - e.touches[0].clientY;
+    const h=Math.min(window.innerHeight*0.88, Math.max(window.innerHeight*0.28, startH+dy));
+    drawer.style.height=h+'px';
+  },{passive:true});
+  window.addEventListener('touchend',()=>{if(startY){drawer.style.transition=''; drawer.style.height=''; startY=0}},{passive:true});
+})();
+renderAll();
+</script>
+</body>
+</html>
