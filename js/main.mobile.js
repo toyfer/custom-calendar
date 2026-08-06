@@ -53,17 +53,24 @@ function updateConnectivity() {
   document.body.classList.toggle('is-offline', !state.online);
 }
 
+/** Month navigation without forcing day selection (view-first) */
+function jumpMonth(y, m, { selectDay = null } = {}) {
+  state.viewYear = y;
+  state.viewMonth = m;
+  if (selectDay != null) {
+    state.selectedDate = ui.ymd(y, m, selectDay);
+  } else if (state.selectedDate) {
+    state.selectedDate = clampYmdToMonth(state.selectedDate, y, m);
+  }
+  persistAccounts(state);
+  paint();
+  if (liveAccounts(state).length) fetchAll();
+}
+
 function paint() {
   updateConnectivity();
   ui.renderHeader(state, {
-    onMonthJump: (y, m) => {
-      state.viewYear = y;
-      state.viewMonth = m;
-      state.selectedDate = ui.ymd(y, m, 1);
-      persistAccounts(state);
-      paint();
-      if (liveAccounts(state).length) fetchAll();
-    },
+    onMonthJump: (y, m) => jumpMonth(y, m),
     onAvatarClick: () => openAcctSheet(),
     onSolo: (id) => toggleSolo(id),
   });
@@ -167,8 +174,7 @@ function ensureFlatpickr() {
   const common = {
     disableMobile: true,
     allowInput: false,
-    locale:
-      window.flatpickr?.l10ns?.ja ? 'ja' : undefined,
+    locale: window.flatpickr?.l10ns?.ja ? 'ja' : undefined,
     time_24hr: true,
     minuteIncrement: 5,
   };
@@ -401,28 +407,20 @@ async function onComposerSave() {
 }
 
 function shift(delta) {
-  state.viewMonth += delta;
-  if (state.viewMonth < 0) {
-    state.viewMonth = 11;
-    state.viewYear -= 1;
-  } else if (state.viewMonth > 11) {
-    state.viewMonth = 0;
-    state.viewYear += 1;
+  let m = state.viewMonth + delta;
+  let y = state.viewYear;
+  if (m < 0) {
+    m = 11;
+    y -= 1;
+  } else if (m > 11) {
+    m = 0;
+    y += 1;
   }
-  state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
-  persistAccounts(state);
-  paint();
-  if (liveAccounts(state).length) fetchAll();
+  jumpMonth(y, m);
 }
 
 function setViewYearMonth(y, m) {
-  state.viewYear = y;
-  state.viewMonth = m;
-  state.selectedDate = ui.ymd(y, m, 1);
-  persistAccounts(state);
-  ui.setDrawerDetent('peek');
-  paint();
-  if (liveAccounts(state).length) fetchAll();
+  jumpMonth(y, m);
 }
 
 function maybeEnableAuth() {
@@ -660,12 +658,7 @@ function buildYmPicker() {
       const b = document.createElement('button');
       b.type = 'button';
       b.textContent = m + 1 + '月';
-      if (y === state.viewYear && m === state.viewMonth) {
-        b.classList.add('active');
-        b.style.borderColor = 'var(--accent)';
-        b.style.background = 'var(--accent-soft)';
-        b.style.color = 'var(--accent)';
-      }
+      if (y === state.viewYear && m === state.viewMonth) b.classList.add('active');
       b.onclick = () => {
         const s = $('ymSheet');
         if (s) s.hidden = true;
@@ -681,13 +674,8 @@ function wire() {
   $('nextBtn')?.addEventListener('click', () => shift(1));
   $('todayBtn')?.addEventListener('click', () => {
     const n = new Date();
-    state.viewYear = n.getFullYear();
-    state.viewMonth = n.getMonth();
-    state.selectedDate = toYmd(n);
-    persistAccounts(state);
+    jumpMonth(n.getFullYear(), n.getMonth(), { selectDay: n.getDate() });
     ui.setDrawerDetent('peek');
-    paint();
-    if (liveAccounts(state).length) fetchAll();
   });
   $('fab')?.addEventListener('click', () =>
     openComposer('create', null, state.selectedDate),
@@ -720,7 +708,8 @@ function wire() {
     }),
   );
   document.querySelector('#ymSheet .sheet-backdrop')?.addEventListener('click', () => {
-    $('ymSheet').hidden = true;
+    const s = $('ymSheet');
+    if (s) s.hidden = true;
   });
 
   $('composerSave')?.addEventListener('click', onComposerSave);
@@ -900,7 +889,7 @@ async function boot() {
     state.viewYear = now.getFullYear();
     state.viewMonth = now.getMonth();
   }
-  // View-first: no day selected until user taps (drawer stays closed)
+  // View-first: drawer closed until user taps a day
   if (!state.selectedDate) state.selectedDate = null;
   else state.selectedDate = clampYmdToMonth(state.selectedDate, state.viewYear, state.viewMonth);
 
