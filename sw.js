@@ -1,7 +1,8 @@
-/* Custom Calendar v2 — static SW only (GitHub Pages)
- * Never cache Google API / OAuth. Events live in IndexedDB. */
+/* Custom Calendar v2.1 — static SW only (GitHub Pages)
+ * Never cache Google API / OAuth. Events live in IndexedDB.
+ * Bump VERSION to force cache refresh for view-first fix. */
 
-const VERSION = 'cc-v2-mobile-2026-08-06';
+const VERSION = 'cc-v2-1-2026-08-06b';
 const PRECACHE = [
   './',
   './index.html',
@@ -35,9 +36,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k)))
-      )
+      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -56,11 +55,9 @@ function isGoogleApi(url) {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
-
   const url = new URL(req.url);
   if (isGoogleApi(url)) return;
   if (url.origin !== self.location.origin) return;
-
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -73,7 +70,6 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-
   event.respondWith(
     caches.open(VERSION).then(async (cache) => {
       const cached = await cache.match(req);
