@@ -61,7 +61,7 @@
       <button id="addAccountBtn" class="primary" style="flex:1">＋ アカウントを追加</button>
       <button id="openSettingsBtn" class="ghost" style="flex:0 0 auto">⚙ 設定</button>
     </div>
-    <p class="sheet-hint">タップで表示/非表示 · 色は重ね表示で区別</p>
+    <p class="sheet-hint">タップで表示/非表示 · 長押し不要 · 色は重ね表示で区別</p>
   </div>
 </div>
 <dialog id="ymPicker" class="ym-picker">
@@ -71,6 +71,7 @@
   </div>
   <div id="ymGrid" class="ym-grid"></div>
 </dialog>
+<!-- Reuse existing edit/settings modals from legacy for real API -->
 <div id="settingsModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" style="display:none">
   <div class="modal">
     <div class="modal-head"><h3 id="settingsTitle">設定</h3><button type="button" class="icon-btn" data-close-settings>×</button></div>
