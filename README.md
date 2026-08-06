@@ -1,86 +1,75 @@
-# custom-calendar
+# custom-calendar v2
 
 Google Calendar より速く・軽く使える **複数アカウント重ね表示** UI。  
-**PWA**（ホーム画面追加）· **キャッシュ優先** · 月/週/一覧 · ドラッグ移動 · 副カレンダー作成。
+**表示に徹する** 月ファースト · **触ってから編集** · PWA · キャッシュ優先。
 
 ## デモ
 
-`https://toyfer.github.io/custom-calendar/`
+https://toyfer.github.io/custom-calendar/
 
-## 運用できる？
+## 思想 (View-First Progressive Disclosure)
 
-| やりたいこと | 可否 | 仕組み |
-|--------------|------|--------|
-| 複数アカウント同時表示・編集 | ✅ | オーバーレイ + アカウント別トークン |
-| スマホ最適化 | ✅ | ボトムナビ · FAB · 作成シート · safe-area |
-| PWA / Service Worker | ✅ | `manifest.webmanifest` + `sw.js`（静的のみ） |
-| API をキャッシュで回す | ✅ | IndexedDB 月単位 · TTL 5分 · 先にキャッシュ表示 |
+| Layer | いつ | 何を見せる |
+|-------|------|------------|
+| **1 常時** | 起動直後 | 年月 · 月チップ · 42セル月グリッド(ドットのみ) · ボトムナビ |
+| **2 選択時** | 日付タップ後 | Day Drawer (予定一覧) · 条件付き FAB |
+| **3 要求時** | 編集/追加ボタン | Composer シート |
 
-### PWA の注意（GitHub Pages）
+複数 Google カレンダーの **重ね表示・作成・編集・削除** はそのまま維持。
 
-- **HTTPS** 必須 → GitHub Pages でそのまま可
-- SW は **アプリの静的ファイルだけ** キャッシュ（HTML/CSS/JS/アイコン）
-- **Google API・OAuth トークンは SW に載せない**（セキュリティ上も仕様上も正しい）
-- 予定データは **IndexedDB**（`js/cache.js`）でアカウント×月キー
-- オフライン時: キャッシュ済み月は表示可 / 未取得月は不可
-- トークンは **sessionStorage** のため、完全オフラインでは「再連携」が必要な場合あり
-
-### ホーム画面に追加
-
-- **iOS Safari**: 共有 →「ホーム画面に追加」
-- **Android Chrome**: メニュー →「アプリをインストール」/ ホーム画面に追加
-
-## コンセプト
+## できること
 
 | やりたいこと | 操作 |
 |--------------|------|
-| 予定を重ねて見る | デフォルト。全アカウントを色分け |
-| 一時的に1つ隠す | チップ tap |
-| 作成先アカウント / カレンダー | 作成シートのセレクト |
-| 月 / 週 / 一覧 | 下ナビ（モバイル）or トグル / `M` `W` `L` |
-| 予定追加 | 中央 FAB（モバイル）|
-| 予定移動 | 月・週でドラッグ（デスクトップ向け）|
-| 強制再取得 | ↻（キャッシュ TTL を無視）|
+| 予定を重ねて見る | デフォルト。アカウント色でドット/左ボーダー |
+| 一時的に1つだけ見る | アカウントシートでダブルタップ or 長押し → Solo |
+| 一時的に隠す | シートのトグル |
+| 作成先アカウント/カレンダー | Composer のセレクト |
+| 月移動 | ‹ › · スワイプ · 月チップ · 年月ラベル |
+| 予定追加 | 日を選ぶ → FAB または「タップして追加」 |
+| 予定編集/削除 | Drawer 行の編集 / 削除 |
+| 強制再取得 | オンライン復帰時自動 / キャッシュ TTL 5分 |
 
-## キャッシュ戦略
+## キャッシュ
 
 ```
 表示月を開く
   → IndexedDB から即描画（あれば）
-  → 全アカウントの取得が TTL 内ならネットワーク省略
-  → 古ければ裏で API → 月キーで保存 → 再描画
+  → TTL 内ならネットワーク省略
+  → 古ければ裏で API → 再描画
 オフライン
-  → キャッシュのみ（バナー表示）
+  → キャッシュのみ（バナー）
 ```
 
-SW: stale-while-revalidate（同一オリジン静的）  
-IDB: `events` + `meta`（`fetch:{accountId}:{YYYY-MM}`）
+- SW: 静的ファイルのみ (HTML/CSS/JS/アイコン)
+- IDB: `accountId:YYYY-MM` キー
+- トークンは sessionStorage（SW に載せない）
+
+## OAuth
+
+1. Google Cloud で Calendar API 有効化
+2. スコープ: `calendar.events` · `calendar.calendarlist.readonly` · userinfo
+3. JS origins: `https://toyfer.github.io` / localhost
+4. Testing なら **全アカウントを Test users に登録**
+5. `config.json` または ⚙ 設定画面
+
+## キーボード
+
+`←` `→` 前/次月 · `T` 今日 · `Esc` シート閉じる · アバター上で `S` Solo
 
 ## アーキテクチャ
 
 ```
-index.html              UI + モバイルシェル
-manifest.webmanifest    PWA
-sw.js                   静的キャッシュのみ
-icons/                  アプリアイコン
+index.html              モバイルシェル (view-first markup)
+styles.mobile-month.css Layer1–3 スタイル
 js/
-  main.js               キャッシュ優先 fetch · SW 登録
-  cache.js              IndexedDB 月キー
+  main.mobile.js        配線 · fetch · Solo · Composer
+  ui.mobile.js          描画 · setChromeVisibility · FAB/Drawer
   google.js             Calendar REST
-  ui.js / state.js …
+  cache.js              IndexedDB
+  state.js / dates.js …
+manifest + sw.js        PWA (静的のみ)
 ```
-
-## OAuth
-
-1. Calendar API 有効化
-2. スコープ: `calendar.events` · `calendar.calendarlist.readonly` · userinfo
-3. JS origins: `https://toyfer.github.io` / localhost
-4. Testing なら全アカウントを Test users に
-5. `config.json` または設定画面
-
-## キーボード
-
-`←` `→` 前/次 · `T` 今日 · `M`/`W`/`L` 表示 · `Esc` 閉じる
 
 ## ライセンス
 
