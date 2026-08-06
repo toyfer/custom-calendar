@@ -1,35 +1,8 @@
-/* Month-First One-Thumb — iPhone-safe layout */
-:root {
-  --surface: #ffffff;
-  --surface-2: #f4f4f5;
-  --surface-3: #e4e4e7;
-  --border: #e4e4e7;
-  --border-soft: #f4f4f5;
-  --text-1: #09090b;
-  --text-2: #71717a;
-  --text-3: #a1a1aa;
-  --accent: #5b6cff;
-  --accent-soft: rgba(91, 108, 255, 0.12);
-  --accent-ring: rgba(91, 108, 255, 0.28);
-  --danger: #ff6b7a;
-  --radius: 16px;
-  --radius-sm: 10px;
-  --tap: 44px;
-  --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
-  --safe-t: env(safe-area-inset-top, 0px);
-  --safe-b: env(safe-area-inset-bottom, 0px);
-  --safe-l: env(safe-area-inset-left, 0px);
-  --safe-r: env(safe-area-inset-right, 0px);
-  --bar-h: 52px;
-  --drawer-peek: 30dvh;
-  --header-row: 48px;
-  --week-h: 28px;
-}
-@media (prefers-color-scheme: dark) {
-  :root { --surface: #0c0e14; --surface-2: #141824; --surface-3: #1c2233; --border: #2a3142; --border-soft: #222836; --text-1: #fafafa; --text-2: #a1a1aa; --text-3: #71717a; }
-}
+/* Month-First One-Thumb — iPhone-safe layout + custom sheets */
+:root{--surface:#ffffff;--surface-2:#f4f4f5;--surface-3:#e4e4e7;--border:#e4e4e7;--border-soft:#f4f4f5;--text-1:#09090b;--text-2:#71717a;--text-3:#a1a1aa;--accent:#5b6cff;--accent-soft:rgba(91,108,255,.12);--accent-ring:rgba(91,108,255,.28);--danger:#ff6b7a;--tap:44px;--font:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;--safe-t:env(safe-area-inset-top,0px);--safe-b:env(safe-area-inset-bottom,0px);--safe-l:env(safe-area-inset-left,0px);--safe-r:env(safe-area-inset-right,0px);--bar-h:52px;--drawer-peek:30dvh;--header-row:48px;--week-h:28px}
+@media (prefers-color-scheme: dark){:root{--surface:#0c0e14;--surface-2:#141824;--surface-3:#1c2233;--border:#2a3142;--border-soft:#222836;--text-1:#fafafa;--text-2:#a1a1aa;--text-3:#71717a}}
 *,*::before,*::after{box-sizing:border-box}
-html{height:100%; -webkit-text-size-adjust:100%}
+html{height:100%;-webkit-text-size-adjust:100%}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:var(--surface);color:var(--text-1);font-family:var(--font);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 button,input,textarea,select{font:inherit;color:inherit}
 button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:none;-webkit-appearance:none}
@@ -117,13 +90,6 @@ button{cursor:pointer;border:none;background:none;padding:0;margin:0;appearance:
 .sheet-actions .primary{flex:1;min-height:48px;border-radius:12px;background:linear-gradient(180deg,#8ea4ff,var(--accent));color:#0b1020;font-weight:700;border:none}
 .sheet-actions .ghost{min-height:48px;padding:0 16px;border-radius:12px;border:1px solid var(--border);background:var(--surface);font-weight:600}
 .sheet-hint{font-size:11px;color:var(--text-2);margin-top:10px;line-height:1.4}
-.ym-picker{border:none;border-radius:16px;padding:16px;max-width:min(92vw,400px);width:92vw;max-height:80dvh;overflow:auto;background:var(--surface);color:var(--text-1)}
-.ym-picker::backdrop{background:rgba(0,0,0,.4)}
-.ym-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.ym-head h3{margin:0;font-size:17px}
-.ym-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-.ym-year{grid-column:1/-1;font-weight:700;margin-top:8px;color:var(--text-2);font-size:13px}
-.ym-grid button{padding:12px 8px;min-height:44px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);font-weight:600}
 .modal-backdrop{position:fixed;inset:0;z-index:55;background:rgba(5,8,16,.55);display:none;align-items:flex-end;justify-content:center;padding:0;padding-bottom:var(--safe-b)}
 .modal-backdrop.open{display:flex}
 .modal{width:100%;max-width:100%;max-height:min(90dvh,720px);overflow:auto;-webkit-overflow-scrolling:touch;background:var(--surface);border:1px solid var(--border);border-radius:18px 18px 0 0;padding:16px;box-shadow:0 -12px 40px rgba(0,0,0,.25)}
@@ -145,42 +111,40 @@ button.ghost{background:transparent;border:1px solid var(--border);color:var(--t
 button.danger{background:rgba(255,107,122,.12);color:var(--danger);border:1px solid rgba(255,107,122,.3);margin-right:auto}
 .icon-btn{width:36px;height:36px;min-width:36px;border-radius:999px;border:1px solid var(--border);background:var(--surface-2);display:grid;place-items:center;font-size:18px;line-height:1;color:var(--text-1)}
 .icon-btn.ghost{background:transparent}
-.toast{position:fixed;left:50%;bottom:calc(var(--bar-h) + var(--safe-b) + 72px);transform:translateX(-50%) translateY(16px);background:#1c2333;color:#fff;padding:12px 18px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:all .22s ease;z-index:70;max-width:min(92vw,360px);text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.25)}
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.toast.error{border:1px solid rgba(255,107,122,.5)}
-.toast.ok{border:1px solid rgba(61,214,140,.45)}
-.offline-hint{position:fixed;top:calc(var(--safe-t) + 8px);left:50%;transform:translateX(-50%);background:rgba(255,184,107,.95);color:#3a2000;padding:8px 14px;border-radius:999px;font-size:12px;font-weight:600;z-index:40;max-width:90vw;text-align:center}
-/* Composer dialog — bottom-sheet on mobile, per MDN dialog + web.dev form best practices */
-.composer-dialog{border:none;padding:0;margin:0;max-width:100%;width:100%;max-height:min(92dvh, 760px);background:var(--surface);color:var(--text-1);overflow:hidden}
-.composer-dialog::backdrop{background:rgba(5,8,16,.45)}
-.composer-dialog[open]{display:flex;flex-direction:column}
-@media (max-width: 640px){
-  .composer-dialog{position:fixed;inset:auto 0 0 0;margin:0;width:100%;max-width:100%;border-radius:16px 16px 0 0;max-height:92dvh}
-  .composer-dialog[open]{animation: slideUp .22s ease}
-}
-@media (min-width: 641px){
-  .composer-dialog{margin:auto;border-radius:16px;max-width:520px;width:92vw;box-shadow:0 16px 48px rgba(0,0,0,.3)}
-}
-@keyframes slideUp{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
-.composer-head{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px calc(12px + 0px);padding-top:calc(12px + var(--safe-t) * 0);border-bottom:1px solid var(--border);background:color-mix(in srgb, var(--surface) 96%, transparent);backdrop-filter:blur(12px)}
+/* Composer custom sheet — no native dialog */
+.composer-sheet{position:fixed;inset:0;z-index:60;display:grid;place-items:end center}
+.composer-sheet[hidden]{display:none!important}
+.composer-backdrop{position:absolute;inset:0;background:rgba(5,8,16,.45)}
+.composer-panel{position:relative;width:100%;max-width:100%;background:var(--surface);border-radius:16px 16px 0 0;max-height:92dvh;display:flex;flex-direction:column;overflow:hidden;animation:slideUp .22s ease}
+.composer-handle{width:36px;height:4px;border-radius:999px;background:var(--surface-3);margin:8px auto 0;flex-shrink:0}
+.composer-head{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:color-mix(in srgb, var(--surface) 96%, transparent);backdrop-filter:blur(12px)}
 .composer-head h3{margin:0;font-size:16px;font-weight:700;flex:1;text-align:center}
 .composer-head button{min-height:40px;padding:0 14px;border-radius:999px;font-weight:600;font-size:14px}
 .composer-body{overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 16px calc(16px + var(--safe-b));display:grid;gap:14px}
 .field{display:grid;gap:6px;font-size:13px;color:var(--text-2)}
-.field input,.field select,.field textarea{width:100%;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--text-1);padding:12px 14px;min-height:48px;font-size:16px}
+.field input,.field textarea{width:100%;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--text-1);padding:12px 14px;min-height:48px;font-size:16px}
+.select-btn{width:100%;min-height:48px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);color:var(--text-1);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:16px}
 .field textarea{min-height:88px;resize:vertical}
-.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--accent-ring);outline-offset:1px;border-color:var(--accent)}
-.field input:invalid,.field select:invalid,.field textarea:invalid{border-color:rgba(255,107,122,.55)}
-.field input.invalid{border-color:var(--danger)}
+.field input:focus,.select-btn:focus,.field textarea:focus{outline:2px solid var(--accent-ring);outline-offset:1px;border-color:var(--accent)}
+.field input:invalid{border-color:rgba(255,107,122,.55)}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width: 380px){ .field-row{grid-template-columns:1fr} }
+@media (max-width:380px){.field-row{grid-template-columns:1fr}}
 .req{color:var(--danger);font-weight:700}
-.field-hint{font-size:11px;color:var(--text-2);min-height:0}
 .form-error{background:rgba(255,107,122,.12);border:1px solid rgba(255,107,122,.3);color:#a00;padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.4}
-@media (prefers-color-scheme: dark){ .form-error{background:rgba(255,107,122,.14);color:#ffb4b9} }
+@media (prefers-color-scheme: dark){.form-error{background:rgba(255,107,122,.14);color:#ffb4b9}}
 .composer-foot-actions{display:flex;gap:8px;align-items:center;margin-top:4px}
 .composer-foot-actions .spacer{flex:1}
-.composer-foot-actions .danger{margin-right:0}
-@media (max-height: 700px){ :root{--drawer-peek:26dvh} .month-label{font-size:18px} .dnum{width:26px;height:26px;font-size:13px} }
-@media (max-width: 360px){ .dnum{width:26px;height:26px;font-size:13px} .e-row{grid-template-columns:48px minmax(0,1fr) auto} }
-@media (prefers-reduced-motion: reduce){ .day-drawer,.toast{transition:none} }
+.toast{position:fixed;left:50%;bottom:calc(var(--bar-h) + var(--safe-b) + 72px);transform:translateX(-50%) translateY(16px);background:#1c2333;color:#fff;padding:12px 18px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:all .22s ease;z-index:70;max-width:min(92vw,360px);text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.offline-hint{position:fixed;top:calc(var(--safe-t) + 8px);left:50%;transform:translateX(-50%);background:rgba(255,184,107,.95);color:#3a2000;padding:8px 14px;border-radius:999px;font-size:12px;font-weight:600;z-index:40;max-width:90vw;text-align:center}
+/* Flatpickr — custom theme to match app, disableMobile forces custom UI */
+.flatpickr-calendar{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);font-family:var(--font)}
+.flatpickr-months .flatpickr-month{background:var(--surface)}
+.flatpickr-current-month .cur-month,.flatpickr-current-month .cur-year{font-weight:700}
+.flatpickr-day.selected{background:var(--accent);border-color:var(--accent)}
+.flatpickr-day.today{border-color:var(--accent)}
+.numInputWrapper:hover{background:var(--surface-2)}
+@keyframes slideUp{from{transform:translateY(12px);opacity:0}to{transform:none;opacity:1}}
+@media (max-height:700px){:root{--drawer-peek:26dvh} .month-label{font-size:18px} .dnum{width:26px;height:26px;font-size:13px}}
+@media (max-width:360px){.dnum{width:26px;height:26px;font-size:13px} .e-row{grid-template-columns:48px minmax(0,1fr) auto}}
+@media (prefers-reduced-motion: reduce){.day-drawer,.toast,.composer-panel{transition:none;animation:none}}
