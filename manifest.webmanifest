@@ -1,4 +1,5 @@
 {
+  "id": "./",
   "name": "Custom Calendar",
   "short_name": "Calendar",
   "description": "複数 Google アカウントを重ねて表示・編集するカレンダー",
@@ -7,7 +8,7 @@
   "display": "standalone",
   "orientation": "any",
   "background_color": "#FFFFFF",
-  "theme_color": "#FFFFFF",
+  "theme_color": "#5B6CFF",
   "lang": "ja",
   "dir": "ltr",
   "categories": ["productivity", "utilities"],
@@ -23,6 +24,12 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "maskable"
+    },
+    {
+      "src": "./icons/icon-light.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ],
   "shortcuts": [

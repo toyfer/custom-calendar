@@ -1,17 +1,17 @@
-/* Custom Calendar — static asset service worker (GitHub Pages)
- * API / OAuth tokens are NEVER cached here. Event data lives in IndexedDB (app). */
+/* Custom Calendar v2 — static SW only (GitHub Pages)
+ * Never cache Google API / OAuth. Events live in IndexedDB. */
 
-const VERSION = 'cc-static-v1';
+const VERSION = 'cc-v2-mobile-2026-08-06';
 const PRECACHE = [
   './',
   './index.html',
-  './styles.css',
-  './styles.overlay.css',
+  './styles.mobile-month.css',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-maskable.svg',
-  './js/main.js',
-  './js/ui.js',
+  './icons/icon-light.svg',
+  './js/main.mobile.js',
+  './js/ui.mobile.js',
   './js/google.js',
   './js/state.js',
   './js/cache.js',
@@ -48,7 +48,8 @@ function isGoogleApi(url) {
     url.hostname === 'accounts.google.com' ||
     url.hostname === 'apis.google.com' ||
     url.hostname.endsWith('.google.com') ||
-    url.hostname.endsWith('.gstatic.com')
+    url.hostname.endsWith('.gstatic.com') ||
+    url.hostname === 'cdn.jsdelivr.net'
   );
 }
 
@@ -57,14 +58,9 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
-
-  // Never intercept Google / OAuth / third-party APIs
   if (isGoogleApi(url)) return;
-
-  // Same-origin only
   if (url.origin !== self.location.origin) return;
 
-  // Navigations: network-first, fallback to cached shell
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -78,7 +74,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: stale-while-revalidate
   event.respondWith(
     caches.open(VERSION).then(async (cache) => {
       const cached = await cache.match(req);

@@ -1,18 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" fill="#0c0e14"/>
-  <rect x="96" y="120" width="320" height="296" rx="36" fill="#141824" stroke="#2a3142" stroke-width="14"/>
-  <rect x="96" y="120" width="320" height="64" rx="36" fill="url(#g)"/>
-  <rect x="96" y="160" width="320" height="24" fill="url(#g)"/>
-  <rect x="140" y="230" width="56" height="44" rx="10" fill="#7b93ff"/>
-  <rect x="228" y="230" width="56" height="44" rx="10" fill="#3dd68c"/>
-  <rect x="316" y="230" width="56" height="44" rx="10" fill="#ffb86b"/>
-  <rect x="140" y="296" width="56" height="44" rx="10" fill="#ff6b9d"/>
-  <rect x="228" y="296" width="56" height="44" rx="10" fill="#2a3142"/>
-  <rect x="316" y="296" width="56" height="44" rx="10" fill="#5eead4"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Custom Calendar">
+  <!-- Safe zone ~80%: content inside 51–461 -->
   <defs>
-    <linearGradient id="g" x1="96" y1="120" x2="416" y2="184" gradientUnits="userSpaceOnUse">
+    <linearGradient id="hdrM" x1="96" y1="110" x2="416" y2="180" gradientUnits="userSpaceOnUse">
       <stop stop-color="#9eb0ff"/>
+      <stop offset="0.5" stop-color="#5b6cff"/>
       <stop offset="1" stop-color="#3dd6b0"/>
     </linearGradient>
   </defs>
+  <rect width="512" height="512" fill="#0c0e14"/>
+  <rect x="96" y="112" width="320" height="300" rx="36" fill="#141824" stroke="#2a3142" stroke-width="10"/>
+  <path d="M96 148c0-20 16-36 36-36h248c20 0 36 16 36 36v36H96v-36z" fill="url(#hdrM)"/>
+  <circle cx="176" cy="140" r="12" fill="#0b1020"/>
+  <circle cx="256" cy="140" r="12" fill="#0b1020"/>
+  <circle cx="336" cy="140" r="12" fill="#0b1020"/>
+  <rect x="132" y="220" width="56" height="40" rx="10" fill="#7b93ff"/>
+  <rect x="228" y="220" width="56" height="40" rx="10" fill="#3dd68c"/>
+  <rect x="324" y="220" width="56" height="40" rx="10" fill="#ffb86b"/>
+  <rect x="132" y="282" width="56" height="40" rx="10" fill="#2a3142"/>
+  <rect x="228" y="282" width="56" height="40" rx="10" fill="#ff6b9d"/>
+  <rect x="324" y="282" width="56" height="40" rx="10" fill="#2a3142"/>
+  <rect x="132" y="344" width="56" height="40" rx="10" fill="#2a3142"/>
+  <rect x="228" y="344" width="56" height="40" rx="10" fill="#2a3142"/>
+  <rect x="324" y="344" width="56" height="40" rx="10" fill="#5eead4"/>
 </svg>

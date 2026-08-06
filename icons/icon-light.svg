@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Custom Calendar">
+  <defs>
+    <linearGradient id="hdrL" x1="64" y1="88" x2="448" y2="168" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#a8b8ff"/>
+      <stop offset="0.5" stop-color="#5b6cff"/>
+      <stop offset="1" stop-color="#3dd6b0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#f4f4f5"/>
+  <rect x="64" y="96" width="384" height="352" rx="44" fill="#ffffff" stroke="#e4e4e7" stroke-width="12"/>
+  <path d="M64 140c0-24.3 19.7-44 44-44h296c24.3 0 44 19.7 44 44v40H64v-40z" fill="url(#hdrL)"/>
+  <circle cx="160" cy="128" r="16" fill="#ffffff" opacity="0.9"/>
+  <circle cx="256" cy="128" r="16" fill="#ffffff" opacity="0.9"/>
+  <circle cx="352" cy="128" r="16" fill="#ffffff" opacity="0.9"/>
+  <rect x="112" y="216" width="72" height="52" rx="12" fill="#7b93ff"/>
+  <rect x="220" y="216" width="72" height="52" rx="12" fill="#3dd68c"/>
+  <rect x="328" y="216" width="72" height="52" rx="12" fill="#ffb86b"/>
+  <rect x="112" y="292" width="72" height="52" rx="12" fill="#e4e4e7"/>
+  <rect x="220" y="292" width="72" height="52" rx="12" fill="#ff6b9d"/>
+  <rect x="328" y="292" width="72" height="52" rx="12" fill="#e4e4e7"/>
+  <rect x="112" y="368" width="72" height="52" rx="12" fill="#e4e4e7"/>
+  <rect x="220" y="368" width="72" height="52" rx="12" fill="#e4e4e7"/>
+  <rect x="328" y="368" width="72" height="52" rx="12" fill="#5eead4"/>
+</svg>
