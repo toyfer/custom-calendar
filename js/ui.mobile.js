@@ -1,4 +1,4 @@
-/** ui.mobile v2 complete — view-first progressive disclosure, year-aware chips, solo, a11y */
+/** ui.mobile v2 — view-first; drawer only while day selected; reliable event edit */
 export const $ = (id) => document.getElementById(id);
 
 export function toast(msg, type = '') {
@@ -27,20 +27,15 @@ export function setStatusDot(online, fromCache) {
   if (hint) hint.hidden = online;
 }
 
-/** Layer1 chrome: chips + avatar + account btn always available for viewing */
 export function setChromeVisibility(state) {
   const chips = $('monthChips');
   if (chips) chips.hidden = false;
-
   const stack = $('avatarStack');
   if (stack) stack.hidden = false;
-
   const acctBtn = $('acctBtn');
   if (acctBtn) acctBtn.hidden = false;
-
   const wrap = document.querySelector('.status-wrap');
   if (wrap) wrap.hidden = false;
-
   setFabVisibility(state);
   syncDrawerChrome(state);
 }
@@ -72,9 +67,14 @@ function syncDrawerChrome(state) {
   const open = !!state.selectedDate;
   drawer.hidden = !open;
   app.classList.toggle('has-drawer', open);
-  if (open && !drawer.getAttribute('data-detent')) {
-    drawer.setAttribute('data-detent', 'peek');
+  if (!open) {
+    drawer.classList.remove('peek', 'half', 'full', 'collapsed');
+    drawer.style.height = '';
+    return;
+  }
+  if (!drawer.classList.contains('peek') && !drawer.classList.contains('half') && !drawer.classList.contains('full') && !drawer.classList.contains('collapsed')) {
     drawer.classList.add('peek');
+    drawer.setAttribute('data-detent', 'peek');
   }
 }
 
@@ -202,8 +202,9 @@ export function renderHeader(state, { onMonthJump, onAvatarClick, onSolo }) {
 }
 
 const swipeState = { bound: false, sx: 0, sy: 0 };
+const dayTapState = { lastYmd: '', lastT: 0 };
 
-export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onMoreClick }) {
+export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onMoreClick, onOpenEvent }) {
   const grid = $('monthGrid');
   if (!grid) return;
   grid.innerHTML = '';
@@ -293,7 +294,23 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
     }
 
     cell.innerHTML = `<span class="dnum">${d}</span><span class="dots">${dotsHtml}</span>`;
-    cell.onclick = () => onSelectDate(curYmd, null);
+
+    // Single tap: select / toggle off. Double tap (or 2nd quick tap): open first event if any
+    cell.addEventListener('click', (e) => {
+      if (e.target.closest('[data-more]')) return;
+      const now = Date.now();
+      const isDouble =
+        dayTapState.lastYmd === curYmd && now - dayTapState.lastT < 380;
+      dayTapState.lastYmd = curYmd;
+      dayTapState.lastT = now;
+
+      if (isDouble && evs.length && typeof onOpenEvent === 'function') {
+        onSelectDate(curYmd);
+        onOpenEvent(evs[0]);
+        return;
+      }
+      onSelectDate(curYmd);
+    });
 
     let pressTimer;
     let moved = false;
@@ -303,9 +320,9 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
         moved = false;
         pressTimer = setTimeout(() => {
           if (!moved) {
-            onSelectDate(curYmd, null);
+            onSelectDate(curYmd);
             setDrawerDetent('half');
-            toast('長押し: FABまたは空欄の「追加」から作成');
+            toast('長押し: FABまたは「追加」から作成');
             try {
               navigator.vibrate?.(10);
             } catch {}
@@ -337,17 +354,9 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
     if (moreEl) {
       moreEl.addEventListener('click', (e) => {
         e.stopPropagation();
-        onSelectDate(curYmd, null);
+        onSelectDate(curYmd);
         setDrawerDetent('half');
         if (onMoreClick) onMoreClick(curYmd);
-      });
-      moreEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelectDate(curYmd, null);
-          setDrawerDetent('half');
-        }
       });
     }
 
@@ -381,7 +390,42 @@ export function renderMonthGrid(state, { onSelectDate, onDrop, onSwipeMonth, onM
   }
 }
 
-export function renderDayDrawer(state, { onEdit, onDelete, onCreate }) {
+function bindRowActivate(row, activate) {
+  // Mobile-friendly: pointerup without drag = activate (edit)
+  let sx = 0;
+  let sy = 0;
+  let dragging = false;
+  row.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.target.closest('button')) return;
+      sx = e.clientX;
+      sy = e.clientY;
+      dragging = false;
+    },
+    { passive: true },
+  );
+  row.addEventListener(
+    'pointermove',
+    (e) => {
+      if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) dragging = true;
+    },
+    { passive: true },
+  );
+  row.addEventListener('pointerup', (e) => {
+    if (e.target.closest('button')) return;
+    if (dragging) return;
+    e.preventDefault();
+    activate();
+  });
+  row.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    // desktop fallback if pointer events missed
+    if (!window.PointerEvent) activate();
+  });
+}
+
+export function renderDayDrawer(state, { onEdit, onDelete, onCreate, onClose }) {
   syncDrawerChrome(state);
 
   const sel = state.selectedDate || null;
@@ -396,13 +440,16 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate }) {
     if (cnt) cnt.textContent = '—';
     if (list) {
       list.innerHTML =
-        '<div class="empty">月グリッドの日付をタップすると<br>予定がここに表示されます</div>';
+        '<div class="empty">月グリッドの日付をタップすると<br>予定がここに表示されます<br><small style="opacity:.8">同じ日をもう一度タップで閉じます</small></div>';
     }
     if (hint) hint.hidden = true;
     return;
   }
 
-  if (hint) hint.hidden = false;
+  if (hint) {
+    hint.hidden = false;
+    hint.textContent = '予定をタップで編集 · 同じ日をもう一度タップで閉じる';
+  }
   const w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
   if (dateEl) dateEl.textContent = `${d.getMonth() + 1}月${d.getDate()}日 ${w}曜日`;
 
@@ -415,11 +462,23 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate }) {
   if (!list) return;
   list.innerHTML = '';
 
+  // Close control in drawer header area via count badge long-press not needed — add close row
+  const closeBar = document.createElement('div');
+  closeBar.className = 'drawer-close-bar';
+  closeBar.innerHTML =
+    '<button type="button" class="sm ghost" id="drawerCloseBtn" style="width:100%;min-height:40px">閉じる（日付の選択を解除）</button>';
+  list.appendChild(closeBar);
+  closeBar.querySelector('#drawerCloseBtn').onclick = () => {
+    if (onClose) onClose();
+  };
+
   if (!evs.length) {
-    list.innerHTML =
-      '<div class="empty">予定なし — <button type="button" class="link" id="emptyCreate">タップして追加</button></div>';
-    const b = list.querySelector('#emptyCreate');
-    if (b) b.onclick = () => onCreate(sel);
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.innerHTML =
+      '予定なし — <button type="button" class="link" id="emptyCreate">タップして追加</button>';
+    list.appendChild(empty);
+    empty.querySelector('#emptyCreate').onclick = () => onCreate(sel);
     return;
   }
 
@@ -427,14 +486,21 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate }) {
     const a = state.accounts.find((x) => x.id === e.accountId);
     const row = document.createElement('div');
     row.className = 'e-row';
-    row.setAttribute('role', 'listitem');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-label', `編集: ${e.summary || '無題'}`);
     row.style.setProperty('--ev', a ? a.color : '#5B6CFF');
-    row.draggable = true;
-    row.addEventListener('dragstart', (ev) => {
-      ev.dataTransfer.setData('text/plain', e.uid);
-      row.classList.add('dragging');
-    });
-    row.addEventListener('dragend', () => row.classList.remove('dragging'));
+
+    // Desktop drag only — avoid breaking mobile tap
+    const canHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (canHover) {
+      row.draggable = true;
+      row.addEventListener('dragstart', (ev) => {
+        ev.dataTransfer.setData('text/plain', e.uid);
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+    }
 
     let timeLabel = '';
     if (e.allDay) timeLabel = '<span class="badge">終日</span>';
@@ -453,18 +519,26 @@ export function renderDayDrawer(state, { onEdit, onDelete, onCreate }) {
     row.innerHTML = `<div class="e-time">${timeLabel}</div><div class="e-main"><div class="e-title"></div><div class="e-meta"></div></div><div class="e-dot" style="background:${a ? a.color : '#5B6CFF'}" title="${acctName}"></div><div class="e-actions"><button type="button" class="sm ghost" data-edit>編集</button><button type="button" class="sm ghost" data-del>削除</button></div>`;
     row.querySelector('.e-title').textContent = e.summary || '(無題)';
     row.querySelector('.e-meta').textContent = acctName + loc;
-    row.querySelector('[data-edit]').onclick = (ev) => {
+
+    const doEdit = () => onEdit(e);
+    row.querySelector('[data-edit]').addEventListener('click', (ev) => {
+      ev.preventDefault();
       ev.stopPropagation();
-      onEdit(e);
-    };
-    row.querySelector('[data-del]').onclick = (ev) => {
+      doEdit();
+    });
+    row.querySelector('[data-del]').addEventListener('click', (ev) => {
+      ev.preventDefault();
       ev.stopPropagation();
       onDelete(e);
-    };
-    row.onclick = (ev) => {
-      if (ev.target.closest('button')) return;
-      onEdit(e);
-    };
+    });
+    bindRowActivate(row, doEdit);
+    row.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        doEdit();
+      }
+    });
+
     list.appendChild(row);
   }
 }
