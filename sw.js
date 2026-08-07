@@ -1,5 +1,5 @@
-/* Custom Calendar v2.3 — static SW only */
-const VERSION = 'cc-v2-3-2026-08-07';
+/* Custom Calendar v2.4 — static SW only */
+const VERSION = 'cc-v2-4-2026-08-08';
 const PRECACHE = [
   './',
   './index.html',
@@ -10,6 +10,7 @@ const PRECACHE = [
   './icons/icon-light.svg',
   './js/main.mobile.js',
   './js/ui.mobile.js',
+  './js/theme.js',
   './js/google.js',
   './js/state.js',
   './js/cache.js',
