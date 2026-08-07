@@ -1,4 +1,4 @@
-/** Theme: light | dark | system — persisted, no OS dialogs */
+/** Theme: light | dark | system — default light, persisted */
 const KEY = 'custom-calendar.theme.v1';
 
 export function getStoredTheme() {
@@ -6,7 +6,7 @@ export function getStoredTheme() {
     const v = localStorage.getItem(KEY);
     if (v === 'light' || v === 'dark' || v === 'system') return v;
   } catch {}
-  return 'system';
+  return 'light';
 }
 
 export function setStoredTheme(mode) {
@@ -25,11 +25,9 @@ export function applyTheme(mode) {
   const resolved = resolveTheme(m);
   document.documentElement.dataset.theme = resolved;
   document.documentElement.dataset.themeMode = m;
-  // theme-color for browser chrome / PWA
   const metas = document.querySelectorAll('meta[name="theme-color"]');
   const color = resolved === 'dark' ? '#0C0E14' : '#FFFFFF';
   metas.forEach((el) => {
-    // keep media-specific if present; also set a catch-all
     if (!el.media || el.media.includes(resolved)) el.setAttribute('content', color);
   });
   let catchAll = document.querySelector('meta[name="theme-color"]:not([media])');

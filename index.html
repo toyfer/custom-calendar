@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" data-theme="light" data-theme-mode="system">
+<html lang="ja" data-theme="light" data-theme-mode="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -53,15 +53,18 @@
   <main id="monthGrid" class="month-grid" aria-label="月カレンダー"></main>
 </div>
 
-<section id="dayDrawer" class="day-drawer peek" aria-label="選択日の予定" data-detent="peek" hidden>
-  <div class="drawer-handle" aria-hidden="true"></div>
-  <div class="drawer-header">
-    <h2 id="drawerDate" class="drawer-date">日付を選択してください</h2>
-    <span id="drawerCount" class="drawer-count">—</span>
-    <button id="drawerExpandBtn" class="icon-btn ghost" type="button" aria-label="広げる">⤢</button>
+<section id="dayDrawer" class="day-drawer" aria-label="選択日の予定" hidden>
+  <div class="drawer-backdrop" data-close-drawer></div>
+  <div class="drawer-panel">
+    <div class="drawer-handle" aria-hidden="true"></div>
+    <div class="drawer-header">
+      <h2 id="drawerDate" class="drawer-date">日付を選択してください</h2>
+      <span id="drawerCount" class="drawer-count">—</span>
+      <button id="drawerCloseBtn" class="icon-btn ghost" type="button" aria-label="閉じる">×</button>
+    </div>
+    <div id="drawerList" class="drawer-list" role="list"></div>
+    <p id="drawerHint" class="sheet-hint drawer-hint" hidden>行をタップで編集 · FABで追加</p>
   </div>
-  <div id="drawerList" class="drawer-list" role="list"></div>
-  <p id="drawerHint" class="sheet-hint drawer-hint" hidden>行をタップで編集 · FABで追加</p>
 </section>
 
 <nav class="bottom-bar" aria-label="操作バー">
@@ -150,17 +153,16 @@
   </div>
 </div>
 
-<div id="composerAccountSheet" class="sheet" hidden role="dialog" aria-modal="true">
+<div id="composerAccountSheet" class="sheet sheet-nested" hidden role="dialog" aria-modal="true">
   <div class="sheet-backdrop" data-close-ca-sheet></div>
   <div class="sheet-panel"><div class="sheet-handle"></div><h3 class="sheet-title">アカウントを選択</h3><div id="composerAccountList" class="acct-list"></div></div>
 </div>
-<div id="composerCalendarSheet" class="sheet" hidden role="dialog" aria-modal="true">
+<div id="composerCalendarSheet" class="sheet sheet-nested" hidden role="dialog" aria-modal="true">
   <div class="sheet-backdrop" data-close-cc-sheet></div>
   <div class="sheet-panel"><div class="sheet-handle"></div><h3 class="sheet-title">カレンダーを選択</h3><div id="composerCalendarList" class="acct-list"></div></div>
 </div>
 
-<!-- Delete confirmation — custom sheet, not OS dialog -->
-<div id="deleteSheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="deleteSheetTitle">
+<div id="deleteSheet" class="sheet sheet-nested" hidden role="dialog" aria-modal="true" aria-labelledby="deleteSheetTitle">
   <div class="sheet-backdrop"></div>
   <div class="sheet-panel delete-panel">
     <div class="sheet-handle"></div>
@@ -191,9 +193,9 @@
     <div class="settings-block">
       <h4 class="settings-label">テーマ</h4>
       <div class="theme-seg" role="group" aria-label="テーマ">
-        <button type="button" class="theme-opt" data-theme-option="light" aria-pressed="false">ライト</button>
+        <button type="button" class="theme-opt" data-theme-option="light" aria-pressed="true">ライト</button>
         <button type="button" class="theme-opt" data-theme-option="dark" aria-pressed="false">ダーク</button>
-        <button type="button" class="theme-opt" data-theme-option="system" aria-pressed="true">システム</button>
+        <button type="button" class="theme-opt" data-theme-option="system" aria-pressed="false">システム</button>
       </div>
     </div>
 
@@ -209,7 +211,6 @@
   </div>
 </div>
 
-<!-- legacy confirm kept hidden unused -->
 <div id="confirmModal" class="modal-backdrop" role="dialog" aria-modal="true" hidden>
   <div class="modal modal-sm">
     <h3>予定を削除</h3>
