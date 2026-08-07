@@ -24,9 +24,91 @@ export function setFabVisibility(state){
 export function ymd(y,m,d){ return `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; }
 function parseYmd(s){ const [y,m,d]=String(s||'').split('-').map(Number); return new Date(y,m-1,d); }
 function eventYmd(e){ try{ if(e.allDay&&e.start&&String(e.start).length>=10) return String(e.start).slice(0,10); const d=new Date(e.start); if(Number.isNaN(d.getTime())) return ''; return ymd(d.getFullYear(),d.getMonth(),d.getDate()); }catch{return '';} }
+export function syncThemeUI(mode) {
+  document.querySelectorAll('[data-theme-option]').forEach(btn => {
+    const m = btn.getAttribute('data-theme-option');
+    const isActive = m === mode;
+    btn.setAttribute('aria-pressed', String(isActive));
+    btn.classList.toggle('active', isActive);
+  });
+}
+export function setComposerMode(mode) {
+  const title = $('composerTitle');
+  const delBtn = $('composerDelete');
+  if (title) title.textContent = mode === 'edit' ? '予定を編集' : '予定を追加';
+  if (delBtn) delBtn.hidden = mode !== 'edit';
+}
+export function fillComposerAccountBtn(state, accountId) {
+  const label = $('composerAccountLabel');
+  const acct = state.accounts.find(a => a.id === accountId);
+  if (label) label.textContent = acct ? (acct.name || acct.email || '選択') : '選択';
+}
+export function fillComposerCalendarBtn(state, calId) {
+  const label = $('composerCalendarLabel');
+  if (!label) return;
+  const accId = $('composerAccount')?.value;
+  const cals = state.calendarsByAccount[accId] || [];
+  const cal = cals.find(c => c.id === calId);
+  label.textContent = cal ? (cal.summary || cal.id) : (calId || 'primary');
+}
+export function renderComposerAccountList(state, onSelect) {
+  const list = $('composerAccountList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!state.accounts.length) { list.innerHTML = '<div class="empty">アカウントがありません</div>'; return; }
+  for (const a of state.accounts) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'acct-row';
+    row.style.minHeight = '56px';
+    row.innerHTML = `<span class="av" style="background:${a.color||'#5B6CFF'}">${(a.name||a.email||'?')[0].toUpperCase()}</span><span class="acct-meta"><b>${a.name||a.email}</b><small>${a.email}</small></span>`;
+    row.onclick = () => onSelect(a.id);
+    list.appendChild(row);
+  }
+}
+export function renderComposerCalendarList(state, accId, onSelect) {
+  const list = $('composerCalendarList');
+  if (!list) return;
+  list.innerHTML = '';
+  const cals = state.calendarsByAccount[accId] || [{id:'primary',summary:'primary',writable:true}];
+  const writable = cals.filter(c => c.writable || c.id === 'primary');
+  if (!writable.length) { list.innerHTML = '<div class="empty">書き込み可能なカレンダーがありません</div>'; return; }
+  for (const c of writable) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'acct-row';
+    row.style.minHeight = '56px';
+    row.innerHTML = `<span class="acct-meta"><b>${c.summary||c.id}</b></span>`;
+    row.onclick = () => onSelect(c.id);
+    list.appendChild(row);
+  }
+}
+export function openDeleteSheet(state, ev, handlers) {
+  const sheet = $('deleteSheet');
+  if (!sheet) return;
+  const titleEl = $('deleteTitle');
+  const metaEl = $('deleteMeta');
+  const swatch = $('deleteSwatch');
+  if (titleEl) titleEl.textContent = ev.summary || '(無題)';
+  if (metaEl) {
+    try {
+      if (ev.allDay) metaEl.textContent = '終日';
+      else { const s = new Date(ev.start); metaEl.textContent = `${s.getMonth()+1}/${s.getDate()} ${String(s.getHours()).padStart(2,'0')}:${String(s.getMinutes()).padStart(2,'0')}`; }
+    } catch { metaEl.textContent = ''; }
+  }
+  if (swatch) { const a = state.accounts?.find(x => x.id === ev.accountId); if (a) swatch.style.background = a.color || 'var(--accent)'; }
+  sheet.hidden = false;
+  const close = () => { sheet.hidden = true; };
+  const okBtn = $('deleteOk');
+  const cancelBtn = $('deleteCancel');
+  const backdrop = sheet.querySelector('.sheet-backdrop');
+  if (okBtn) okBtn.onclick = async () => { close(); await handlers?.onConfirm?.(); };
+  if (cancelBtn) cancelBtn.onclick = close;
+  if (backdrop) backdrop.onclick = close;
+}
 export function renderHeader(state,{onMonthJump,onAvatarClick,onSolo,onStatusClick}){
   const label=$('monthLabel'); if(label) label.textContent=`${state.viewYear}年 ${state.viewMonth+1}月`;
-  const chips=$('monthChips'); if(chips){ chips.hidden=false; chips.innerHTML=''; for(let d=-2;d<=3;d++){ let m=state.viewMonth+d; let y=state.viewYear; while(m<0){m+=12;y-=1;} while(m>=12){m+=12;y+=1;} const b=document.createElement('button'); b.type='button'; b.className='m-chip'+(d===0?' active':''); b.innerHTML=`${m+1}月`+(y!==state.viewYear?`<span class="m-chip-year">${String(y).slice(-2)}年</span>`:''); b.setAttribute('aria-label',`${y}年${m+1}月`); b.onclick=()=>onMonthJump(y,m); chips.appendChild(b);} }
+  const chips=$('monthChips'); if(chips){ chips.hidden=false; chips.innerHTML=''; for(let d=-2;d<=3;d++){ let m=state.viewMonth+d; let y=state.viewYear; while(m<0){m+=12;y-=1;} while(m>=12){m-=12;y+=1;} const b=document.createElement('button'); b.type='button'; b.className='m-chip'+(d===0?' active':''); b.innerHTML=`${m+1}月`+(y!==state.viewYear?`<span class="m-chip-year">${String(y).slice(-2)}年</span>`:''); b.setAttribute('aria-label',`${y}年${m+1}月`); b.onclick=()=>onMonthJump(y,m); chips.appendChild(b);} }
   const stack=$('avatarStack'); if(stack){ stack.innerHTML=''; const all=state.accounts||[]; const vis=all.filter(a=>a.visible!==false); const soloId=state.soloAccountId||null; if(!all.length){ const empty=document.createElement('span'); empty.className='av more'; empty.textContent='+'; stack.appendChild(empty);} else{ vis.slice(0,3).forEach(a=>{ const el=document.createElement('span'); el.className='av'+(soloId===a.id?' solo':'')+(a.stale?' stale':''); el.style.background=a.color||'#5B6CFF'; el.textContent=(a.name||a.email||'?')[0].toUpperCase(); stack.appendChild(el);}); if(all.length>3){ const more=document.createElement('span'); more.className='av more'; more.textContent=`+${all.length-3}`; stack.appendChild(more);} if(all.some(a=>a.visible===false)||soloId||all.some(a=>a.stale)){ const dot=document.createElement('span'); dot.className='av hidden-badge'+(all.some(a=>a.stale)?' stale':''); dot.textContent=all.some(a=>a.stale)?'!':'·'; stack.appendChild(dot);} } stack.onclick=onAvatarClick; stack.ondblclick=(e)=>{e.preventDefault(); if(onSolo) onSolo();}; let t=null; stack.addEventListener('touchstart',()=>{t=setTimeout(()=>{if(onSolo) onSolo(); try{navigator.vibrate?.(10)}catch{}},600);},{passive:true}); stack.addEventListener('touchend',()=>clearTimeout(t)); stack.addEventListener('touchmove',()=>clearTimeout(t)); stack.onkeydown=(e)=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault(); onAvatarClick();} };
   }
   const statusWrap=document.querySelector('.status-wrap'); if(statusWrap&&onStatusClick){ statusWrap.style.cursor='pointer'; statusWrap.onclick=onStatusClick; }

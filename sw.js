@@ -1,5 +1,5 @@
-/* Custom Calendar v2.2 — static SW only */
-const VERSION = 'cc-v2-2-2026-08-06c';
+/* Custom Calendar v2.3 — static SW only */
+const VERSION = 'cc-v2-3-2026-08-07';
 const PRECACHE = [
   './',
   './index.html',
