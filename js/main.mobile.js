@@ -30,8 +30,6 @@ function paint(){
   ui.renderDayDrawer(state,{ onEdit:(e)=>openComposer('edit',e), onDelete:(e)=>askDelete(e), onCreate:(ymd)=>openComposer('create',null,ymd), onClose:()=>clearDaySelection() });
   ui.renderAcctSheet(state,{ onToggle:(id,vis)=>{ const a=accountById(state,id); if(!a) return; a.visible=vis; if(!state.accounts.some(x=>x.visible!==false)){a.visible=true; ui.toast('少なくとも1つは表示が必要');} persistAccounts(state); paint(); }, onSolo:(id)=>toggleSolo(id), onReauth:(id)=>reauth(id) });
   ui.setChromeVisibility(state); ui.setFabVisibility(state); ui.syncThemeUI(getStoredTheme());
-  // keep drawer open if selectedDate exists, else closed
-  if(state.selectedDate){ const drawer=$('dayDrawer'); if(drawer && drawer.hidden) { /* keep hidden until double-tap, so do not auto-open */ } }
 }
 function toggleSolo(id){ const target=id===null?null:id||(state.soloAccountId?null:state.accounts.find(a=>a.visible!==false)?.id||null); if(!target||state.soloAccountId===target){ state.soloAccountId=null; state.accounts.forEach(a=>a.visible=true); ui.toast('全て表示'); } else { state.soloAccountId=target; state.accounts.forEach(a=>a.visible=a.id===target); ui.toast(`${accountById(state,target)?.email||''} のみ`); } persistAccounts(state); paint(); }
 function openAcctSheet(){ const s=$('acctSheet'); if(s) s.hidden=false; paint(); }
@@ -101,12 +99,12 @@ function wire(){
   initTheme();
   $('prevBtn')?.addEventListener('click',()=>shift(-1));
   $('nextBtn')?.addEventListener('click',()=>shift(1));
-  $('todayBtn')?.addEventListener('click',()=>{ const n=new Date(); jumpMonth(n.getFullYear(),n.getMonth(),{selectDay:n.getDate()}); });
+  $('todayBtn')?.addEventListener('click',()=>{ const n=new Date(); jumpMonth(n.getFullYear(),n.getMonth()); });
   $('fab')?.addEventListener('click',()=>openComposer('create',null,state.selectedDate||toYmd(new Date())));
-  // daySheet backdrop / close
-  $('dayDrawer')?.querySelector('.drawer-backdrop')?.addEventListener('click',()=> ui.closeDaySheet());
-  $('dayDrawer')?.querySelector('#drawerCloseBtn')?.addEventListener('click',()=> clearDaySelection());
-  document.querySelector('.drawer-handle')?.addEventListener('click',()=>{ const d=$('dayDrawer'); const cur=d?.classList.contains('open')?'full':'open'; if(cur==='open') ui.closeDaySheet(); });
+  // Day drawer close
+  $('dayDrawer')?.querySelector('.drawer-backdrop')?.addEventListener('click',()=> clearDaySelection());
+  $('drawerCloseBtn')?.addEventListener('click',()=> clearDaySelection());
+  document.querySelector('.drawer-handle')?.addEventListener('click',()=> clearDaySelection());
   $('avatarStack')?.addEventListener('click',openAcctSheet);
   $('acctBtn')?.addEventListener('click',openAcctSheet);
   $('acctSheet')?.querySelector('[data-close-acct]')?.addEventListener('click',closeAcctSheet);
@@ -123,23 +121,28 @@ function wire(){
   document.querySelectorAll('[data-close-composer]').forEach(b=> b.addEventListener('click', closeComposer));
   $('composerSheet')?.querySelector('.composer-backdrop')?.addEventListener('click', closeComposer);
   $('composerDelete')?.addEventListener('click',()=>{ const ev=state.editingEvent; if(ev) askDelete(ev); });
-  $('composerAccountBtn')?.addEventListener('click',()=>{ const h=$('composerAccount'); ui.renderComposerAccountList(state,(id)=>{ if(h) h.value=id; ui.fillComposerAccountBtn(state,id); $('composerAccountSheet').hidden=true; const cl=state.calendarsByAccount[id]||[]; const fc=cl[0]?.id||'primary'; const ch=$('composerCalendar'); if(ch) ch.value=fc; ui.fillComposerCalendarBtn(state,fc); }); $('composerAccountSheet').hidden=false; });
-  document.querySelector('[data-close-ca-sheet]')?.addEventListener('click',()=> $('composerAccountSheet').hidden=true);
-  document.querySelector('#composerAccountSheet .sheet-backdrop')?.addEventListener('click',()=> $('composerAccountSheet').hidden=true);
-  $('composerCalendarBtn')?.addEventListener('click',()=>{ const accId=$('composerAccount')?.value||state.createAccountId; ui.renderComposerCalendarList(state,accId,(calId)=>{ const h=$('composerCalendar'); if(h) h.value=calId; ui.fillComposerCalendarBtn(state,calId); $('composerCalendarSheet').hidden=true; }); $('composerCalendarSheet').hidden=false; });
-  document.querySelector('[data-close-cc-sheet]')?.addEventListener('click',()=> $('composerCalendarSheet').hidden=true);
-  document.querySelector('#composerCalendarSheet .sheet-backdrop')?.addEventListener('click',()=> $('composerCalendarSheet').hidden=true);
+  $('composerAccountBtn')?.addEventListener('click',()=>{ const h=$('composerAccount'); ui.renderComposerAccountList(state,(id)=>{ if(h) h.value=id; ui.fillComposerAccountBtn(state,id); const sheet=$('composerAccountSheet'); if(sheet) sheet.hidden=true; const cl=state.calendarsByAccount[id]||[]; const fc=cl.find(c=>c.writable||c.id==='primary')?.id||cl[0]?.id||'primary'; const ch=$('composerCalendar'); if(ch) ch.value=fc; ui.fillComposerCalendarBtn(state,fc); }); const sheet=$('composerAccountSheet'); if(sheet) sheet.hidden=false; });
+  document.querySelector('[data-close-ca-sheet]')?.addEventListener('click',()=>{ const s=$('composerAccountSheet'); if(s) s.hidden=true; });
+  document.querySelector('#composerAccountSheet .sheet-backdrop')?.addEventListener('click',()=>{ const s=$('composerAccountSheet'); if(s) s.hidden=true; });
+  $('composerCalendarBtn')?.addEventListener('click',()=>{ const accId=$('composerAccount')?.value||state.createAccountId; ui.renderComposerCalendarList(state,accId,(calId)=>{ const h=$('composerCalendar'); if(h) h.value=calId; ui.fillComposerCalendarBtn(state,calId); const s=$('composerCalendarSheet'); if(s) s.hidden=true; }); const s=$('composerCalendarSheet'); if(s) s.hidden=false; });
+  document.querySelector('[data-close-cc-sheet]')?.addEventListener('click',()=>{ const s=$('composerCalendarSheet'); if(s) s.hidden=true; });
+  document.querySelector('#composerCalendarSheet .sheet-backdrop')?.addEventListener('click',()=>{ const s=$('composerCalendarSheet'); if(s) s.hidden=true; });
   $('settingsModal')?.addEventListener('click',(ev)=>{ if(ev.target===$('settingsModal')||ev.target.hasAttribute?.('data-close-settings')) closeSettings(); });
   $('settingsForm')?.addEventListener('submit',(ev)=>{ ev.preventDefault(); const CLIENT_ID=($('cfgClientId')?.value||'').trim(); const API_KEY=($('cfgApiKey')?.value||'').trim(); if(isPlaceholder(CLIENT_ID)||isPlaceholder(API_KEY)||!CLIENT_ID||!API_KEY){ ui.toast('有効な Client ID と API Key を入力してください','error'); return; } saveConfigToLocal({CLIENT_ID,API_KEY}); ui.toast('設定を保存しました。再読み込みします','ok'); setTimeout(()=>location.reload(),400); });
   $('clearCfgBtn')?.addEventListener('click',()=>{ clearConfigLocal(); ui.toast('ローカル設定を削除しました'); setTimeout(()=>location.reload(),400); });
-  // delete sheet handled via ui.openDeleteSheet
-  const drawer=$('dayDrawer'); let sx=0, sy=0;
-  drawer?.addEventListener('touchstart',(e)=>{ sx=e.touches[0].clientX; sy=e.touches[0].clientY; },{passive:true});
-  drawer?.addEventListener('touchend',(e)=>{ const dx=e.changedTouches[0].clientX-sx; const dy=e.changedTouches[0].clientY-sy; if(Math.abs(dx)>64 && Math.abs(dx)>Math.abs(dy)*1.6){ /* swipe day */ } },{passive:true});
   window.addEventListener('online',()=>{ state.online=true; updateConnectivity(); if(liveAccounts(state).length) fetchAll({force:true}); });
   window.addEventListener('offline',()=>{ state.online=false; updateConnectivity(); paint(); });
   document.addEventListener('keydown',(e)=>{
-    if(e.key==='Escape'){ closeAcctSheet(); closeSettings(); const cs=$('composerSheet'); if(cs&&!cs.hidden) closeComposer(); else if($('dayDrawer') && !$('dayDrawer').hidden && !$('dayDrawer').classList.contains('open')) {} else ui.closeDaySheet(); $('confirmModal')?.classList.remove('open'); const yms=$('ymSheet'); if(yms&&!yms.hidden) yms.hidden=true; const ca=$('composerAccountSheet'); if(ca&&!ca.hidden) ca.hidden=true; const cc=$('composerCalendarSheet'); if(cc&&!cc.hidden) cc.hidden=true; const ds=$('deleteSheet'); if(ds&&!ds.hidden) ds.hidden=true; }
+    if(e.key==='Escape'){
+      closeAcctSheet(); closeSettings();
+      const ca=$('composerAccountSheet'); if(ca&&!ca.hidden){ ca.hidden=true; return; }
+      const cc=$('composerCalendarSheet'); if(cc&&!cc.hidden){ cc.hidden=true; return; }
+      const ds=$('deleteSheet'); if(ds&&!ds.hidden){ ds.hidden=true; return; }
+      const cs=$('composerSheet'); if(cs&&!cs.hidden){ closeComposer(); return; }
+      const dd=$('dayDrawer'); if(dd&&!dd.hidden){ clearDaySelection(); return; }
+      const yms=$('ymSheet'); if(yms&&!yms.hidden) yms.hidden=true;
+      $('confirmModal')?.classList.remove('open');
+    }
     if(e.key==='ArrowLeft'&&!e.target.closest('input,textarea,[contenteditable]')) shift(-1);
     if(e.key==='ArrowRight'&&!e.target.closest('input,textarea,[contenteditable]')) shift(1);
     if((e.key==='t'||e.key==='T')&&!e.target.closest('input,textarea,[contenteditable]')) $('todayBtn')?.click();
